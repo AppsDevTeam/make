@@ -1,0 +1,25 @@
+#!/bin/sh
+# Soubory testů suity pro i-tou z N částí: test-shard-files <Suite> <i> <N>
+# (volá project.mk, cesty jsou relativní k aktuálnímu adresáři)
+#
+# Suita se dělí po celých souborech (Cestech), ne po jednotlivých testech jako codecept
+# --shard - testy jednoho Cestu na sobě často závisí (první založí data, další je čtou)
+# a v jiné části by běžely nad jinou DB. Soubory se rozdělují vyrovnaně podle počtu testů
+# (od největšího vždy do nejméně vytížené části), pořadí je stabilní, takže se každá
+# část dá spustit samostatně (CI job, lokální část) a výsledky se doplní.
+set -eu
+
+suite=$1 index=$2 total=$3
+# Spouští se z kořene projektu (adresář project/, kde je tests/)
+
+find "tests/$suite" -type f \( -name '*Cest.php' -o -name '*Test.php' \) | sort | while read -r file; do
+	# testy = veřejné metody kromě hooků (_before, _after …)
+	printf '%s %s\n' "$(grep -cE '^[[:space:]]*public function [a-zA-Z]' "$file" || true)" "$file"
+done | sort -k1,1nr -k2,2 | awk -v index_="$index" -v total="$total" '
+	{
+		best = 1
+		for (i = 2; i <= total; i++) if (load[i] < load[best]) best = i
+		load[best] += ($1 > 0 ? $1 : 1)
+		if (best == index_) print $2
+	}
+'
