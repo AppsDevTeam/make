@@ -43,7 +43,7 @@ endif
 ADT_MAKE_DIR := $(or $(ADT_MAKE_DEV),.make/$(or $(ADT_MAKE_VERSION),$(error ADT_MAKE_VERSION chybí v config/.env.common)))
 include $(ADT_MAKE_DIR)/root.mk
 .make/%/root.mk:
-	@echo "adt/make $*: stahuji do $(CURDIR)/.make/$*"; u=https://github.com/AppsDevTeam/make/archive/refs/tags/v$*.tar.gz; t=$$(mktemp -d); \
+	@echo "adt/make $*: stahuji do $(CURDIR)/.make/$*" >&2; u=https://github.com/AppsDevTeam/make/archive/refs/tags/v$*.tar.gz; t=$$(mktemp -d); \
 	{ curl -fsSL $$u || wget -qO- $$u; } | tar xzf - -C $$t && mkdir -p .make && rm -rf .make/$* && mv $$t/* .make/$* && rmdir $$t
 ```
 
@@ -59,7 +59,7 @@ export
 ADT_MAKE_DIR := $(or $(ADT_MAKE_DEV),.make/$(or $(ADT_MAKE_VERSION),$(error ADT_MAKE_VERSION chybí v .env - spusť make config)))
 include $(ADT_MAKE_DIR)/project.mk
 .make/%/project.mk:
-	@echo "adt/make $*: stahuji do $(CURDIR)/.make/$*"; u=https://github.com/AppsDevTeam/make/archive/refs/tags/v$*.tar.gz; t=$$(mktemp -d); \
+	@echo "adt/make $*: stahuji do $(CURDIR)/.make/$*" >&2; u=https://github.com/AppsDevTeam/make/archive/refs/tags/v$*.tar.gz; t=$$(mktemp -d); \
 	{ curl -fsSL $$u || wget -qO- $$u; } | tar xzf - -C $$t && mkdir -p .make && rm -rf .make/$* && mv $$t/* .make/$* && rmdir $$t
 ```
 
