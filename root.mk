@@ -14,6 +14,7 @@ ADT_PROJECT_TARGETS = analyse analyse-cs analyse-cs-fix analyse-sc audit build c
 ADT_DOCKER_TARGETS = audit-image docker-down docker-up docker-upd docker-upd-no-pull _docker-upd-no-build
 
 .PHONY: $(ADT_PROJECT_TARGETS) $(PROJECT_MAKE_TARGETS) $(ADT_DOCKER_TARGETS) $(DOCKER_MAKE_TARGETS)
+HELP_TARGETS += $(ADT_PROJECT_TARGETS) $(PROJECT_MAKE_TARGETS) $(ADT_DOCKER_TARGETS) $(DOCKER_MAKE_TARGETS)
 $(sort $(ADT_PROJECT_TARGETS) $(PROJECT_MAKE_TARGETS)):
 	@$(MAKE) --no-print-directory -C project $@
 
@@ -45,6 +46,9 @@ config:
 	@[ -z "$(SANDBOX_REMOTE)" ] || git remote get-url sandbox >/dev/null 2>&1 || git remote add sandbox $(SANDBOX_REMOTE)
 
 # Druhá izolovaná instance projektu (např. pro Claude Code): make config && make config-claude N=1
+# CONFIG_CLAUDE_DOMAIN: lokální doména projektu, druhá instance dostane <doména>_cl<N>.<tld>
+# (www.sandbox.loc → www.sandbox_cl1.loc); prázdné = doména se nemění
+CONFIG_CLAUDE_DOMAIN ?=
 .PHONY: config-claude
 config-claude:
 	@if [ -z "$(N)" ]; then \
@@ -53,6 +57,7 @@ config-claude:
 	fi
 	@# <projekt>-local → <projekt>_cl<N>-local (opakované spuštění jen změní číslo)
 	perl -pi -e 's/^PROJECT_NAME=(.+?)(?:_cl\d+)?-local$$/PROJECT_NAME=$$1_cl$(N)-local/' docker/.env project/.env
+	$(if $(CONFIG_CLAUDE_DOMAIN),perl -pi -e 's/\Q$(CONFIG_CLAUDE_DOMAIN)\E/$(basename $(CONFIG_CLAUDE_DOMAIN))_cl$(N)$(suffix $(CONFIG_CLAUDE_DOMAIN))/g' docker/.env project/.env)
 	@# Druhá instance nepublikuje žádný port (kolize s PROJECT_IP hlavní instance): všechny porty
 	@# v docker-compose.local.yml (gitignorovaná pracovní kopie) jsou na PROJECT_IP. `!reset []`
 	@# i u služeb, které by jinak porty zdědily z ci-local.yml.

@@ -82,13 +82,13 @@ Vývoj balíčku: `ADT_MAKE_DEV=/absolutní/cesta/ke/klonu make ...` načte klon
 | Cíl | |
 |---|---|
 | `config` | pracovní kopie pro `local` (`_env`), lokální hodnoty do `.env`, git hooky, remote `sandbox` (`SANDBOX_REMOTE`, prázdné = nepřidávat) |
-| `config-claude N=<n>` | druhá izolovaná instance (`<projekt>_cl<n>-local`, bez publikovaných portů, bez sdílené proxy) |
+| `config-claude N=<n>` | druhá izolovaná instance (`<projekt>_cl<n>-local`, bez publikovaných portů, bez sdílené proxy; s `CONFIG_CLAUDE_DOMAIN=www.projekt.loc` i doména `www.projekt_cl<n>.loc`) |
 | `_env STAGE=<stage>` | `.env` v kořeni, `docker/` a `project/` z vrstev v `config/` (SOPS se rozšifruje), soubory stage, zašifrované JSON; háček `_env-after::`. Deploy ho pouští na serveru |
 | `secrets-decrypt`, `secrets-encrypt` | `SECRETS_STAGE=<stage>\|all`, default aktuální `STAGE` |
 | `_secrets-check` | pre-commit: nezašifrované citlivé hodnoty v `SOPS_CHECK_FILES` (default všechny stage) |
 | `release` | CalVer `vRRRR.M.N`, release notes přes `claude -p "/release-notes ..."` (`RELEASE_NOTES`), u CRA SBOM, commit + tag + push |
 | `playwright-restart` | restart Playwright kontejnerů projektu |
-| `help` (výchozí) | seznam cílů |
+| `help` (výchozí) | seznam cílů včetně přeposílaných |
 
 Do `project/` se přeposílá: `analyse*`, `audit`, `build`, `checkout`, `clear`, `init`,
 `migrations`, `migrations-diff`, `reload-consumers`, `sbom`, `sbom-check`, `test*`, `watch`

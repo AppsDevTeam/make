@@ -13,7 +13,9 @@ SUBMAKE = $(MAKE) --no-print-directory
 
 .DEFAULT_GOAL := help
 
-# Seznam cílů (bez pomocných _cílů) ze všech načtených makefilů
+# Seznam cílů (bez pomocných _cílů) ze všech načtených makefilů. Cíle definované proměnnou
+# (přeposílání do project/ a docker/) grep nenajde, root.mk je dává do HELP_TARGETS.
+HELP_TARGETS ?=
 .PHONY: help
 help:
-	@grep -hE '^[a-z][a-zA-Z0-9_-]*:([^=]|$$)' $(MAKEFILE_LIST) | cut -d: -f1 | sort -u | tr '\n' ' '; echo
+	@{ grep -hE '^[a-z][a-zA-Z0-9_-]*:([^=]|$$)' $(MAKEFILE_LIST) | cut -d: -f1; printf '%s\n' $(HELP_TARGETS); } | grep -v '^_' | sort -u | tr '\n' ' '; echo
