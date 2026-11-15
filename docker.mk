@@ -30,12 +30,12 @@ endif
 ################################################################################
 # TARGETS
 
-.PHONY: docker-down docker-up docker-upd docker-upd-no-pull _docker-upd-no-build audit-image _docker-common _docker-up-clear
+.PHONY: docker-down docker-up docker-upd docker-upd-no-pull _docker-upd-no-build audit-image _docker-common
 docker-down:
 	$(DOCKER_COMPOSE) down
 
 docker-up: _docker-common
-	bash -c "trap 'trap - SIGINT SIGTERM ERR; $(SUBMAKE) _docker-up-clear' SIGINT SIGTERM ERR; $(DOCKER_COMPOSE) up --force-recreate --build"
+	$(DOCKER_COMPOSE) up --force-recreate --build
 
 docker-upd: _docker-common
 	$(DOCKER_COMPOSE) up -d --force-recreate --build
@@ -71,9 +71,18 @@ audit-image:
 # HELPERS
 
 _docker-common:
-	@# Např. pro otevření prohlížeče na hostovi s laděnkou
+	@# eohd (docker/bin/eohd projektů do adt/make 1.0.x) poslouchal na všech rozhraních a příkazy
+	@# z portu NC_PORT pouštěl přes eval - kdokoli ze stejné sítě mohl spustit příkaz na stroji
+	@# vývojáře. Nahrazovat se nebude (otevíral jen laděnku konzole v prohlížeči hostu, a to
+	@# ani nefungovalo), tady se jen ukončí běžící instance všech projektů i s jejich nc. Nejdřív
+	@# děti (nc běží v podshellu eohd, po zabití rodiče by osiřel), pak osiřelé nc z dřívějška.
 	@if [ "$(STAGE)" = 'local' ]; then \
-		bash -c "eohd &" ;\
+		pids=$$(pgrep -f '/eohd$$' 2>/dev/null); \
+		for pid in $$pids; do pkill -P $$pid 2>/dev/null; done; \
+		[ -z "$$pids" ] || kill $$pids 2>/dev/null; \
+		for pid in $$(pgrep -f '^nc -l (172\.17\.0\.1 -p )?[0-9]+$$' 2>/dev/null); do \
+			[ "$$(ps -o ppid= -p $$pid | tr -d ' ')" = 1 ] && kill $$pid 2>/dev/null; \
+		done; true; \
 	fi
 
 	@# Lokálně jsou porty na loopback IP projektu (PROJECT_IP) - na macOS musí existovat alias
@@ -104,10 +113,5 @@ _docker-common:
 	@[ -f ../project/composer.json ] && cp ../project/composer.json ../project/composer.lock php/ || true
 
 	$(DOCKER_COMPOSE) build --pull
-
-_docker-up-clear:
-	@if [ "$(STAGE)" = 'local' ]; then \
-		pgrep -f eohd | xargs -L 1 ps -o pgid= | xargs -L 1 pkill -g ;\
-	fi
 
 include $(ADT_MAKE_SELF)end.mk

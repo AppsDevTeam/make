@@ -146,6 +146,6 @@ migrations-before::
 
 ## Kontejnery (`docker.mk`)
 
-`docker-up` (na popředí, lokálně s `eohd`), `docker-upd`, `docker-upd-no-pull`, `docker-down`,
+`docker-up` (na popředí), `docker-upd`, `docker-upd-no-pull`, `docker-down`,
 `audit-image` (Trivy, `IMAGE`). Lokálně porty na `PROJECT_IP` a volitelná sdílená proxy
 adt/local-proxy (`LOCAL_PROXY`, `LOCAL_PROXY_DIR`).

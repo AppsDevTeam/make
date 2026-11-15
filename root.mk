@@ -37,7 +37,6 @@ config:
 		sed -i.bak "/^PROJECT_ROOT=/s?PROJECT_ROOT=.*?PROJECT_ROOT=$$(pwd)/project?" $$file && rm $$file.bak; \
 		sed -i.bak "/^DOCKER_SELENIUM=/s#DOCKER_SELENIUM=.*#DOCKER_SELENIUM=$$([ "$$(uname -p)" = "arm" ] && echo "seleniarm/standalone-chromium" || echo "selenium/standalone-chrome")#" $$file && rm $$file.bak; \
 		sed -i.bak "/^DOCKER_VOLUME_FLAG=/s/DOCKER_VOLUME_FLAG=.*/DOCKER_VOLUME_FLAG=`if [ "\`uname\`" = "Linux" ]; then echo ':consistent'; else echo ':delegated'; fi`/" $$file && rm $$file.bak; \
-		sed -i.bak "/^APP_BROWSER=/s/APP_BROWSER=.*/APP_BROWSER=$$([ "$$(uname)" = "Darwin" ] && echo "open" || echo "sensible-browser")/" $$file && rm $$file.bak; \
 		sed -i.bak "/^APP_EDITOR=/s#APP_EDITOR=.*#APP_EDITOR=$$([ "$$(uname)" = "Darwin" ] && echo "phpstorm://open?file=%file\&line=%line" || echo "editor://%action/?file=%file\&line=%line\&search=%search\&replace=%replace")#" $$file && rm $$file.bak; \
 		sed -i.bak "/^USER_EMAIL=/s/USER_EMAIL=.*/USER_EMAIL=`git config user.email`/" $$file && rm $$file.bak; \
 	done
