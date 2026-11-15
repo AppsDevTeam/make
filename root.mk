@@ -33,7 +33,10 @@ config:
 
 	@touch .env
 
-	@for file in docker/.env project/.env; do \
+	@# I kořenový .env (od 1.0 ho píše _env): CI ho po `make config` načte do prostředí
+	@# (`source .env`) a proměnná ze shellu v docker compose přebije docker/.env - prázdné
+	@# PROJECT_ROOT z config/.env.local pak rozbilo mount (invalid spec: :/var/www/html).
+	@for file in .env docker/.env project/.env; do \
 		sed -i.bak "/^PROJECT_ROOT=/s?PROJECT_ROOT=.*?PROJECT_ROOT=$$(pwd)/project?" $$file && rm $$file.bak; \
 		sed -i.bak "/^DOCKER_SELENIUM=/s#DOCKER_SELENIUM=.*#DOCKER_SELENIUM=$$([ "$$(uname -p)" = "arm" ] && echo "seleniarm/standalone-chromium" || echo "selenium/standalone-chrome")#" $$file && rm $$file.bak; \
 		sed -i.bak "/^DOCKER_VOLUME_FLAG=/s/DOCKER_VOLUME_FLAG=.*/DOCKER_VOLUME_FLAG=`if [ "\`uname\`" = "Linux" ]; then echo ':consistent'; else echo ':delegated'; fi`/" $$file && rm $$file.bak; \
