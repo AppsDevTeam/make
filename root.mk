@@ -205,6 +205,46 @@ _sops-cat:
 	fi
 
 ################################################################################
+# Pre-commit hook
+
+# Kontroly před commitem - hooks/pre-commit projektu je jen `exec make pre-commit` (git ho pouští
+# v kořeni repozitáře). Nejdřív automatické opravy PRE_COMMIT_FIX, pak cíle PRE_COMMIT_CHECKS;
+# výstup kontroly se vypíše jen při chybě, commit projde, jen když prošly všechny. Projekt
+# seznam mění před include, např. `PRE_COMMIT_CHECKS += analyse-deps`.
+PRE_COMMIT_FIX ?= analyse-cs-fix
+PRE_COMMIT_CHECKS ?= analyse-cs analyse-sc test-coverage _secrets-check
+
+# Soubory, které oprava změnila, se musí dostat i do commitu - git commituje index, ne pracovní
+# adresář, a kontroly běží nad pracovním adresářem: neopravená verze by jinak prošla do gitu.
+# Celý stagnutý soubor se stagne znovu; u částečně stagnutého (změny i mimo index) to bez
+# rizika přidání cizích změn nejde, commit se proto zastaví.
+#
+# PATH: hook pouští i GitKraken nebo IDE bez PATH z ~/.bash_aliases - bez obálky php
+# z adt/docker-binaries (project/vendor/bin) by phpcs a phpstan běžely v PHP hostu. Relativně
+# jako v aliasu: obálka předá cestu skriptu do kontejneru, kde je project/ v /var/www/html.
+.PHONY: pre-commit
+pre-commit: export PATH := ./vendor/bin:./project/vendor/bin:$(PATH)
+pre-commit:
+	@diffs() { git diff --name-only | while read -r f; do echo "$$f $$(git diff -- "$$f" | git hash-object --stdin)"; done; }; \
+	before=$$(diffs); \
+	$(if $(PRE_COMMIT_FIX),$(SUBMAKE) $(PRE_COMMIT_FIX) >/dev/null 2>&1;) \
+	staged=$$(git diff --cached --name-only --diff-filter=ACMR); partial=; \
+	for f in $$(diffs | grep -vxF "$$before" | cut -d' ' -f1); do \
+		printf '%s\n' "$$staged" | grep -qxF "$$f" || continue; \
+		if printf '%s\n' "$$before" | grep -q "^$$f "; then partial="$$partial $$f"; else git add -- "$$f"; fi; \
+	done; \
+	if [ -n "$$partial" ]; then \
+		printf '\033[31m%s\033[0m%s\n' "$(PRE_COMMIT_FIX) upravil částečně stagnuté soubory, zkontroluj a stagni je:" "$$partial"; exit 1; \
+	fi; \
+	failed=; n=0; total=$(words $(PRE_COMMIT_CHECKS)); \
+	for t in $(PRE_COMMIT_CHECKS); do \
+		n=$$((n + 1)); printf '\033[33m[%s/%s]\033[0m %-22s' $$n $$total $$t; \
+		if out=$$($(SUBMAKE) $$t 2>&1); then printf '\033[32mOK\033[0m\n'; \
+		else printf '\033[31mCHYBA\033[0m\n\n%s\n\n' "$$out"; failed=1; fi; \
+	done; \
+	[ -z "$$failed" ]
+
+################################################################################
 # Release
 
 # Verze vRRRR.M.N (rok, měsíc od 1, pořadí releasu v měsíci od 1), release notes dopíše Claude

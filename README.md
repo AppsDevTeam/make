@@ -86,6 +86,7 @@ Vývoj balíčku: `ADT_MAKE_DEV=/absolutní/cesta/ke/klonu make ...` načte klon
 | `_env STAGE=<stage>` | `.env` v kořeni, `docker/` a `project/` z vrstev v `config/` (SOPS se rozšifruje), soubory stage, zašifrované JSON; háček `_env-after::`. Deploy ho pouští na serveru |
 | `secrets-decrypt`, `secrets-encrypt` | `SECRETS_STAGE=<stage>\|all`, default aktuální `STAGE` |
 | `_secrets-check` | pre-commit: nezašifrované citlivé hodnoty v `SOPS_CHECK_FILES` (default všechny stage) |
+| `pre-commit` | celý git hook (`hooks/pre-commit` projektu je `exec make pre-commit`): opravy `PRE_COMMIT_FIX` (default `analyse-cs-fix`, opravené stagnuté soubory stagne znovu), pak kontroly `PRE_COMMIT_CHECKS` (default `analyse-cs analyse-sc test-coverage _secrets-check`) s PATH na obálky z `project/vendor/bin` |
 | `release` | CalVer `vRRRR.M.N`, release notes přes `claude -p "/release-notes ..."` (`RELEASE_NOTES`), u CRA SBOM, commit + tag + push |
 | `playwright-restart` | restart Playwright kontejnerů projektu |
 | `help` (výchozí) | seznam cílů včetně přeposílaných |
