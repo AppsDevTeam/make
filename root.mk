@@ -117,7 +117,28 @@ _env:
 	@for file in .env docker/.env project/.env; do \
 		sed -i.bak "/^USER=/s/USER=.*/USER=`id -u`:`id -g`/" $$file && rm $$file.bak; \
 	done
+	@$(SUBMAKE) _tls-cert
 	@$(MAKE) --no-print-directory _env-after
+
+# Self-signed certifikát pro HTTPS nginxu na stage local a ci (stage/<stage>.conf, 443 a 1420).
+# Necommituje se (privátní klíč v gitu hlásí každý sken secrets a byl stejný ve všech projektech),
+# vznikne tady, jen když chybí: pro PROJECT_URL z docker/.env, se SAN (bez něj ho prohlížeč
+# neuzná ani po ručním přidání do důvěryhodných), na 10 let. Na main TLS řeší reverse proxy.
+TLS_CERT_DIR ?= docker/nginx/etc/nginx/conf.d
+.PHONY: _tls-cert
+_tls-cert:
+	@if [ "$(STAGE)" = local ] || [ "$(STAGE)" = ci ]; then \
+		crt=$(TLS_CERT_DIR)/nginx-selfsigned.crt; key=$(TLS_CERT_DIR)/nginx-selfsigned.key; \
+		if [ ! -f "$$crt" ] || [ ! -f "$$key" ]; then \
+			host=$$(sed -n 's/^PROJECT_URL=//p' docker/.env | tail -1); host=$${host:-localhost}; \
+			openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=$$host" \
+				-addext "subjectAltName=DNS:$$host,DNS:localhost" \
+				-keyout "$$key" -out "$$crt" >/dev/null 2>&1 \
+				|| { echo "Nepodařilo se vygenerovat TLS certifikát ($$crt) - chybí openssl?" >&2; exit 1; }; \
+			chmod 600 "$$key"; \
+			echo "TLS: vygenerován self-signed certifikát pro $$host ($$crt)"; \
+		fi; \
+	fi
 
 _env-after::
 	@:

@@ -84,6 +84,7 @@ Vývoj balíčku: `ADT_MAKE_DEV=/absolutní/cesta/ke/klonu make ...` načte klon
 | `config` | pracovní kopie pro `local` (`_env`), lokální hodnoty do `.env`, git hooky, remote `sandbox` (`SANDBOX_REMOTE`, prázdné = nepřidávat) |
 | `config-claude N=<n>` | druhá izolovaná instance (`<projekt>_cl<n>-local`, bez publikovaných portů, bez sdílené proxy; s `CONFIG_CLAUDE_DOMAIN=www.projekt.loc` i doména `www.projekt_cl<n>.loc`) |
 | `_env STAGE=<stage>` | `.env` v kořeni, `docker/` a `project/` z vrstev v `config/` (SOPS se rozšifruje), soubory stage, zašifrované JSON; háček `_env-after::`. Deploy ho pouští na serveru |
+| `_tls-cert` | (součást `_env`) na stage `local`/`ci` vygeneruje self-signed certifikát nginxu pro `PROJECT_URL` (se SAN, 10 let) do `TLS_CERT_DIR` (`docker/nginx/etc/nginx/conf.d`), jen když chybí; necommituje se |
 | `secrets-decrypt`, `secrets-encrypt` | `SECRETS_STAGE=<stage>\|all`, default aktuální `STAGE` |
 | `_secrets-check` | pre-commit: nezašifrované citlivé hodnoty v `SOPS_CHECK_FILES` (default všechny stage) |
 | `pre-commit` | celý git hook (`hooks/pre-commit` projektu je `exec make pre-commit`): opravy `PRE_COMMIT_FIX` (default `analyse-cs-fix`, opravené stagnuté soubory stagne znovu), pak kontroly `PRE_COMMIT_CHECKS` (default `analyse-cs analyse-sc test-coverage _secrets-check`) s PATH na obálky z `project/vendor/bin` |
