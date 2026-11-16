@@ -126,7 +126,8 @@ _env:
 
 # Self-signed certifikát pro HTTPS nginxu na stage local a ci (stage/<stage>.conf, 443 a 1420).
 # Necommituje se (privátní klíč v gitu hlásí každý sken secrets a byl stejný ve všech projektech),
-# vznikne tady, jen když chybí: pro PROJECT_URL z docker/.env, se SAN (bez něj ho prohlížeč
+# vznikne tady, jen když chybí: pro PROJECT_URL z docker/.env (víc domén čárkou: CN = první,
+# SAN všechny), se SAN (bez něj ho prohlížeč
 # neuzná ani po ručním přidání do důvěryhodných), na 10 let. Na main TLS řeší reverse proxy.
 TLS_CERT_DIR ?= docker/nginx/etc/nginx/conf.d
 .PHONY: _tls-cert
@@ -134,13 +135,14 @@ _tls-cert:
 	@if [ "$(STAGE)" = local ] || [ "$(STAGE)" = ci ]; then \
 		crt=$(TLS_CERT_DIR)/nginx-selfsigned.crt; key=$(TLS_CERT_DIR)/nginx-selfsigned.key; \
 		if [ ! -f "$$crt" ] || [ ! -f "$$key" ]; then \
-			host=$$(sed -n 's/^PROJECT_URL=//p' docker/.env | tail -1); host=$${host:-localhost}; \
-			openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=$$host" \
-				-addext "subjectAltName=DNS:$$host,DNS:localhost" \
+			hosts=$$(sed -n 's/^PROJECT_URL=//p' docker/.env | tail -1 | tr -d '"' | tr ',' ' '); hosts=$${hosts:-localhost}; \
+			cn=$${hosts%% *}; san=$$(for h in $$hosts; do printf 'DNS:%s,' $$h; done); \
+			openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=$$cn" \
+				-addext "subjectAltName=$${san}DNS:localhost" \
 				-keyout "$$key" -out "$$crt" >/dev/null 2>&1 \
 				|| { echo "Nepodařilo se vygenerovat TLS certifikát ($$crt) - chybí openssl?" >&2; exit 1; }; \
 			chmod 600 "$$key"; \
-			echo "TLS: vygenerován self-signed certifikát pro $$host ($$crt)"; \
+			echo "TLS: vygenerován self-signed certifikát pro $$cn ($$crt)"; \
 		fi; \
 	fi
 
