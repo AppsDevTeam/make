@@ -283,9 +283,11 @@ pre-commit:
 ################################################################################
 # Release
 
-# Verze vRRRR.M.N (rok, měsíc od 1, pořadí releasu v měsíci od 1), release notes dopíše Claude
-# (skill /release-notes projektu), u projektu pod CRA (existuje project/sbom/) přegeneruje SBOM
-# a po odsouhlasení commitne, otaguje a pushne. Deploy zůstává samostatný krok.
+# Verze vRRRR.M.N (rok, měsíc od 1, pořadí releasu v měsíci od 1). Release notes dopíše Claude:
+# s ANTHROPIC_API_KEY přes API (bin/release-notes.py - CI, adt/ci po publishi vydá tag a GitLab
+# Release), jinak claude CLI (skill /release-notes projektu). `make release` je lokální varianta
+# bez CD: notes, u projektu pod CRA (existuje project/sbom/) SBOM, po odsouhlasení commit, tag
+# a push. Deploy zůstává samostatný krok.
 #
 # Remote se bere z upstreamu aktuální větve: v odvozeném projektu je to origin, v repu samotného
 # sandboxu sandbox (origin tam není, jen by duplikoval stejnou URL).
@@ -294,19 +296,35 @@ pre-commit:
 # ho protlačí do všech podprocesů. Claude pak hledá přihlášení pod účtem "501" a hlásí "Not logged in".
 # Přihlašovací jméno mu proto vrátíme jen pro tenhle příkaz.
 RELEASE_NOTES ?= docs/release-notes.md
-.PHONY: release
+RELEASE_NOTES_MODEL ?= claude-opus-5-5
+# Příští verze: tagy v aktuálním měsíci + 1 (před voláním git fetch --tags)
+define release_version
+PREFIX=v$$(date +%Y).$$(( 10#$$(date +%m) )); echo $$PREFIX.$$(( $$(git tag -l "$$PREFIX.*" | wc -l) + 1 ))
+endef
+.PHONY: release-version release-notes release
+release-version:
+	@$(release_version)
+
+# make release-notes [VERSION=vRRRR.M.N] - jen záznam do RELEASE_NOTES, bez commitu
+release-notes:
+	@set -e; VERSION=$${VERSION:-$$($(release_version))}; \
+	if [ -n "$$ANTHROPIC_API_KEY" ]; then \
+		python3 $(ADT_MAKE_SELF)bin/release-notes.py "$$VERSION" "$(RELEASE_NOTES)" "$(RELEASE_NOTES_MODEL)"; \
+	else \
+		command -v claude >/dev/null || { echo "claude CLI není nainstalované (nebo nastav ANTHROPIC_API_KEY)"; exit 1; }; \
+		USER=$$(id -un) claude -p "/release-notes $$VERSION" --permission-mode acceptEdits; \
+	fi
+
 release:
-	@command -v claude >/dev/null || { echo "claude CLI není nainstalované"; exit 1; }
 	@git diff --quiet && git diff --cached --quiet || { echo "Working tree není čistý - commitni nebo stashni změny."; exit 1; }
 	@set -e; \
 	REMOTE=$$(git config "branch.$$(git branch --show-current).remote" || true); \
 	[ -n "$$REMOTE" ] || { echo "Aktuální větev nesleduje žádný remote (git branch --set-upstream-to=...)."; exit 1; }; \
 	git fetch --tags $$REMOTE; \
 	LAST_TAG=$$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true); \
-	PREFIX=v$$(date +%Y).$$(( 10#$$(date +%m) )); \
-	VERSION=$$PREFIX.$$(( $$(git tag -l "$$PREFIX.*" | wc -l) + 1 )); \
+	VERSION=$$($(release_version)); \
 	echo "Poslední tag: $${LAST_TAG:-žádný} -> nový release: $$VERSION"; \
-	USER=$$(id -un) claude -p "/release-notes $$VERSION" --permission-mode acceptEdits; \
+	$(MAKE) --no-print-directory release-notes VERSION=$$VERSION; \
 	if [ -d project/sbom ]; then $(SUBMAKE) sbom; git status --short project/sbom/; fi; \
 	git --no-pager diff $(RELEASE_NOTES); \
 	echo -n "Je release $$VERSION v pořádku? [y/N] " && read ans && [ "$${ans:-N}" = y ]; \

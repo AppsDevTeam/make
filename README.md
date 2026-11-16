@@ -88,7 +88,9 @@ Vývoj balíčku: `ADT_MAKE_DEV=/absolutní/cesta/ke/klonu make ...` načte klon
 | `secrets-decrypt`, `secrets-encrypt` | `SECRETS_STAGE=<stage>\|all`, default aktuální `STAGE`; jen dotenv soubory `SOPS_FILES` (projekt zúží přes `override SOPS_FILES =`), další formáty přes háčky `secrets-decrypt-after::` / `secrets-encrypt-after::` |
 | `_secrets-check` | pre-commit: nezašifrované citlivé hodnoty v `SOPS_CHECK_FILES` (default všechny stage) |
 | `pre-commit` | celý git hook (`hooks/pre-commit` projektu je `exec make pre-commit`): opravy `PRE_COMMIT_FIX` (default `analyse-cs-fix`, opravené stagnuté soubory stagne znovu), pak kontroly `PRE_COMMIT_CHECKS` (default `analyse-cs analyse-sc test-coverage _secrets-check`) s PATH na obálky z `project/vendor/bin` |
-| `release` | CalVer `vRRRR.M.N`, release notes přes `claude -p "/release-notes ..."` (`RELEASE_NOTES`), u CRA SBOM, commit + tag + push |
+| `release-version` | vypíše příští CalVer verzi `vRRRR.M.N` (tagy v měsíci + 1) |
+| `release-notes [VERSION=…]` | záznam verze do `RELEASE_NOTES` (`docs/release-notes.md`): s `ANTHROPIC_API_KEY` přes Claude API (`bin/release-notes.py`, model `RELEASE_NOTES_MODEL`; takhle to dělá CI po publishi, viz adt/ci), jinak `claude -p "/release-notes …"` (skill projektu) |
+| `release` | lokální release bez CD: `release-notes`, u CRA SBOM, po odsouhlasení commit + tag + push |
 | `playwright-restart` | restart Playwright kontejnerů projektu |
 | `help` (výchozí) | seznam cílů včetně přeposílaných |
 
