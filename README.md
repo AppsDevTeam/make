@@ -131,6 +131,7 @@ cílů musí sedět s receptem.
 | `test-suite SUITE=<S> [SHARD=i/N]` | jedna suita nebo její část (po celých Cestech, `bin/test-shard-files`) |
 | `test-unit`, `test-acceptance [SHARD=i/N]`, `test-acceptance-retry`, `test-crawler`, `test-coverage`, `test-prepare` | |
 | `audit`, `sbom`, `sbom-check` | composer + yarn audit, CycloneDX SBOM pro projekty pod CRA |
+| `debug-key SLUG=<Jmeno>`, `debug-token DOMAIN=<host> [HOURS=12]` | klíč vývojáře (`DEBUG_KEY`, výchozí `~/.config/adt/debug-key`) a cookie `nette-debug` pro debug režim na serveru, adt/configurator ≥ 7 (README tam). Běží v `appsdevteam/php:<PHP_IMAGE>-composer` bez sítě, klíč jen přes stdin |
 
 ### Migrace
 

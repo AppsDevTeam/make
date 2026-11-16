@@ -382,4 +382,30 @@ sbom-check: sbom
 		exit 1; \
 	fi
 
+################################################################################
+# Debug režim na serverech
+
+# Klíč vývojáře a cookie nette-debug (ADT\DebugToken z adt/configurator ≥ 7). Na serveru je jen veřejný
+# klíč (APP_DEVELOPERS), privátní zůstává v DEBUG_KEY na počítači vývojáře a do jednorázového kontejneru
+# bez sítě jde jen přes stdin. Token platí pro jednu doménu a HOURS hodin (nejvýš 168).
+DEBUG_KEY ?= $(HOME)/.config/adt/debug-key
+DEBUG_TOKEN_RUN = docker run --rm -i --network none --entrypoint php \
+	-v $(CURDIR)/vendor/adt/configurator:/configurator:ro appsdevteam/php:$(PHP_IMAGE)-composer /configurator/bin/debug-token
+.PHONY: debug-key debug-token
+debug-key:
+	@[ -f vendor/adt/configurator/bin/debug-token ] || { echo "Chybí adt/configurator ≥ 7 ve vendor/ - make init" >&2; exit 1; }
+	@if [ ! -s "$(DEBUG_KEY)" ]; then \
+		[ -n "$(SLUG)" ] || { echo "make debug-key SLUG=JmenoPrijmeni" >&2; exit 1; }; \
+		mkdir -p "$$(dirname "$(DEBUG_KEY)")" && umask 077 && \
+		$(DEBUG_TOKEN_RUN) new "$(SLUG)" > "$(DEBUG_KEY).tmp" && mv "$(DEBUG_KEY).tmp" "$(DEBUG_KEY)" || exit 1; \
+		echo "Privátní klíč: $(DEBUG_KEY) (nikomu nedávat, nikam necommitovat)"; \
+	fi; \
+	echo "Veřejný klíč - řádek do APP_DEVELOPERS (config/project/.env.common projektů):"; \
+	$(DEBUG_TOKEN_RUN) public < "$(DEBUG_KEY)"
+
+debug-token:
+	@[ -n "$(DOMAIN)" ] || { echo "make debug-token DOMAIN=www.projekt.cz [HOURS=12]" >&2; exit 1; }
+	@[ -s "$(DEBUG_KEY)" ] || { echo "Chybí $(DEBUG_KEY) - nejdřív make debug-key SLUG=JmenoPrijmeni" >&2; exit 1; }
+	@$(DEBUG_TOKEN_RUN) token "$(DOMAIN)" "$(or $(HOURS),12)" < "$(DEBUG_KEY)"
+
 include $(ADT_MAKE_SELF)end.mk
