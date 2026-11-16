@@ -78,9 +78,16 @@ init:
 init-after::
 	@:
 
-# Composer image ext-* ignoruje a runtime image na serveru přestavuje root, ne deploy - release
-# s novým rozšířením musí spadnout tady, ne až za běhu (bin/check-extensions.php). 0 = vypnuto.
+# Composer image ext-* ignoruje, runtime je musí mít podle composer.lock - release s novým
+# rozšířením musí spadnout tady, ne až za běhu (bin/check-extensions.php). 0 = vypnuto: deploy
+# (recept adt/docker-deployer) kontrolu v _prepare vypíná a volá `make check-extensions` až po
+# `dupd up` před přepnutím symlinku - v _prepare ještě běží starý kontejner, nový image s novým
+# rozšířením zvedne teprve publish.
 CHECK_EXTENSIONS ?= 1
+.PHONY: check-extensions
+check-extensions:
+	$(SUDO) php $(ADT_MAKE_SELF)bin/check-extensions.php
+
 _install:
 	@if [ "$(STAGE)" = "local" ] || [ "$(STAGE)" = "ci" ]; then \
 		$(COMPOSER_BIN) install ;\
