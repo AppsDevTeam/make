@@ -27,9 +27,12 @@ $(sort $(ADT_DOCKER_TARGETS) $(DOCKER_MAKE_TARGETS)):
 # Remote šablony projektu (sandbox), `make config` ho přidá. Prázdné = nepřidávat.
 SANDBOX_REMOTE ?= ssh://git@git.appsdevteam.com:2222/adt/sandbox_web.git
 
+# CONFIG_STAGE: pracovní kopie pro jinou stage než local (CI: `make config CONFIG_STAGE=ci`,
+# aby nepotřebovalo klíč k šifrovanému config/*/.env.local); lokální hodnoty níže se dosadí vždy
+CONFIG_STAGE ?= local
 .PHONY: config
 config:
-	@$(MAKE) --no-print-directory _env STAGE=local
+	@$(MAKE) --no-print-directory _env STAGE=$(CONFIG_STAGE)
 
 	@touch .env
 
@@ -74,8 +77,6 @@ config-claude:
 # Projektové kroky navíc: _env-after:: v makefilu projektu.
 .PHONY: _env _env-after
 _env:
-	@# PHP načítá všechna ini v conf.d - ini předchozí stage (po `make config STAGE=...`) pryč
-	@rm -f docker/php/usr/local/etc/php/conf.d/default.*.ini
 	@for dir in docker project; do \
 		find config/$$dir -type f \( -name "*$(STAGE)*" \) ! -name ".env*" | while read src; do \
 			dest="$$dir/$${src#config/$$dir/}"; \
@@ -83,6 +84,9 @@ _env:
 			cp -f "$$src" "$$dest"; \
 		done; \
 	done
+	@# PHP načítá všechna ini v conf.d - pryč ini předchozí stage i stagí, které chytila maska
+	@# výše jako podřetězec (STAGE=dev zkopíruje i default.csob-dev.ini); zůstane jen aktuální
+	@find docker/php/usr/local/etc/php/conf.d -name 'default.*.ini' ! -name 'default.$(STAGE).ini' -delete 2>/dev/null || true
 
 	@# Skládá se do dočasného souboru - když SOPS neumí některou vrstvu rozšifrovat,
 	@# zůstane stávající .env nedotčený místo aby se useknul na půlce
@@ -153,7 +157,8 @@ SECRETS_STAGE ?= $(STAGE)
 SOPS_STAGE_GLOB = $(if $(filter-out all,$(SECRETS_STAGE)),.env.$(SECRETS_STAGE),.env.*)
 # Soubory jedné stage - pro secrets-decrypt/secrets-encrypt.
 # .env.common je sdílený nešifrovaný základ, do šifrování nepatří.
-SOPS_FILES = $(shell find ./config -type f -name "*$(SOPS_STAGE_GLOB)" ! -name "*.env.common")
+# Projekt může zúžit (override SOPS_FILES = ...), např. nešifrovat config/.env.local a .env.ci.
+SOPS_FILES ?= $(shell find ./config -type f -name "*$(SOPS_STAGE_GLOB)" ! -name "*.env.common")
 # Kontrola v pre-commit hooku (_secrets-check) - default všechny stage. Projekt, který šifruje
 # jen některé (hesla dockerové DB local a ci v plaintextu), ho zúží.
 SOPS_CHECK_FILES ?= $(shell find ./config -type f -name "*.env.*" ! -name "*.env.common")
@@ -162,7 +167,9 @@ unexport SOPS_FILES SOPS_CHECK_FILES
 
 # Použití: make secrets-decrypt [SECRETS_STAGE=<stage>|all] - bez parametru aktuální STAGE.
 # Deploy předává stage explicitně, aby ho nerozbil poškozený soubor cizí stage.
-.PHONY: secrets-decrypt secrets-encrypt _secrets-stage-check _secrets-check _sops-cat
+# Projektové kroky navíc (další šifrované soubory mimo dotenv, např. binární klíče):
+# secrets-decrypt-after:: a secrets-encrypt-after:: v makefilu projektu (SECRETS_STAGE k dispozici).
+.PHONY: secrets-decrypt secrets-encrypt secrets-decrypt-after secrets-encrypt-after _secrets-stage-check _secrets-check _sops-cat
 secrets-decrypt: _secrets-stage-check
 	@for file in $(SOPS_FILES); do \
 		if grep -q "sops_mac" "$$file" 2>/dev/null; then \
@@ -170,6 +177,9 @@ secrets-decrypt: _secrets-stage-check
 			$(SOPS) decrypt --input-type dotenv --output-type dotenv -i "$$file"; \
 		fi; \
 	done
+	@$(MAKE) --no-print-directory secrets-decrypt-after
+secrets-decrypt-after::
+	@:
 
 # Použití: make secrets-encrypt [SECRETS_STAGE=<stage>|all] - bez parametru aktuální STAGE
 secrets-encrypt: _secrets-stage-check
@@ -188,6 +198,9 @@ secrets-encrypt: _secrets-stage-check
 			fi; \
 		fi; \
 	done
+	@$(MAKE) --no-print-directory secrets-encrypt-after
+secrets-encrypt-after::
+	@:
 
 # Neexistující stage nesmí projít tiše - glob by nematchnul nic a target by skončil
 # s exit 0, takže by se `make secrets-encrypt SECRETS_STAGE=<překlep>` tvářil jako úspěch

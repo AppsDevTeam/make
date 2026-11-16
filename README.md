@@ -81,11 +81,11 @@ Vývoj balíčku: `ADT_MAKE_DEV=/absolutní/cesta/ke/klonu make ...` načte klon
 
 | Cíl | |
 |---|---|
-| `config` | pracovní kopie pro `local` (`_env`), lokální hodnoty do `.env`, git hooky, remote `sandbox` (`SANDBOX_REMOTE`, prázdné = nepřidávat) |
+| `config` | pracovní kopie pro `local` (`_env`; `CONFIG_STAGE=ci` v CI, které nemá klíč k šifrovanému `.env.local`), lokální hodnoty do `.env`, git hooky, remote `sandbox` (`SANDBOX_REMOTE`, prázdné = nepřidávat) |
 | `config-claude N=<n>` | druhá izolovaná instance (`<projekt>_cl<n>-local`, bez publikovaných portů, bez sdílené proxy; s `CONFIG_CLAUDE_DOMAIN=www.projekt.loc` i doména `www.projekt_cl<n>.loc`) |
 | `_env STAGE=<stage>` | `.env` v kořeni, `docker/` a `project/` z vrstev v `config/` (SOPS se rozšifruje), soubory stage, zašifrované JSON; háček `_env-after::`. Deploy ho pouští na serveru |
 | `_tls-cert` | (součást `_env`) na stage `local`/`ci` vygeneruje self-signed certifikát nginxu pro `PROJECT_URL` (se SAN, 10 let) do `TLS_CERT_DIR` (`docker/nginx/etc/nginx/conf.d`), jen když chybí; necommituje se |
-| `secrets-decrypt`, `secrets-encrypt` | `SECRETS_STAGE=<stage>\|all`, default aktuální `STAGE` |
+| `secrets-decrypt`, `secrets-encrypt` | `SECRETS_STAGE=<stage>\|all`, default aktuální `STAGE`; jen dotenv soubory `SOPS_FILES` (projekt zúží přes `override SOPS_FILES =`), další formáty přes háčky `secrets-decrypt-after::` / `secrets-encrypt-after::` |
 | `_secrets-check` | pre-commit: nezašifrované citlivé hodnoty v `SOPS_CHECK_FILES` (default všechny stage) |
 | `pre-commit` | celý git hook (`hooks/pre-commit` projektu je `exec make pre-commit`): opravy `PRE_COMMIT_FIX` (default `analyse-cs-fix`, opravené stagnuté soubory stagne znovu), pak kontroly `PRE_COMMIT_CHECKS` (default `analyse-cs analyse-sc test-coverage _secrets-check`) s PATH na obálky z `project/vendor/bin` |
 | `release` | CalVer `vRRRR.M.N`, release notes přes `claude -p "/release-notes ..."` (`RELEASE_NOTES`), u CRA SBOM, commit + tag + push |
@@ -106,7 +106,7 @@ cílů musí sedět s receptem.
 |---|---|
 | `analyse`, `analyse-cs`, `analyse-cs-fix`, `analyse-sc` | phpcs (`CS_PATHS`), PHPStan (`PHPSTAN_PATHS`, `PHPSTAN_ARGS`) |
 | `build`, `watch` | `yarn build:dev` lokálně, jinak `yarn build`; watch = `yarn $(YARN_WATCH)` (default `dev`) |
-| `init`, `checkout`, `_prepare`, `clear` | instalace (composer v kontejneru `appsdevteam/php:<PHP_IMAGE>-composer`, na serveru `composer` z adt/docker-binaries), kontrola rozšíření PHP (`CHECK_EXTENSIONS`), reset opcache, temp, autoload. Deploy volá `_prepare` |
+| `init`, `checkout`, `_prepare`, `clear` | instalace (composer v kontejneru `appsdevteam/php:<PHP_IMAGE>-composer`, na serveru `composer` z adt/docker-binaries), kontrola rozšíření PHP (`CHECK_EXTENSIONS`), reset opcache, temp, autoload. Deploy volá `_prepare`; `init` končí háčkem `init-after::` (založení DB, data) |
 | `migrations` | viz níže |
 | `migrations-diff` | `migrations:diff` + `MIGRATIONS_DIFF_ARGS` |
 | `migrations-kill-sessions` | jen s `MIGRATIONS_KILL_SESSIONS = 1`: `dbal:kill-sessions` (adt/doctrine-components) před migracemi v údržbě |
@@ -124,8 +124,8 @@ argumenty za `--` jdou do `migrations:migrate`. Prázdná DB jde bez dry-runu, p
 zastaví, v CI se migruje bez ptaní. Projekt bez adresáře `migrations/` má cíl prázdný
 (`MIGRATIONS_ENABLED`).
 
-Víc databází: `PROJECTS = <názvy>` - migrace, `migrations-kill-sessions` i `reload-consumers` se
-opakují pro každý projekt s `APP_ENV=project/<název>`. Kroky projektu:
+Víc databází: `PROJECTS = <názvy>` (z `.env` i s uvozovkami) - migrace, `migrations-kill-sessions`
+i `reload-consumers` se opakují pro každý projekt s `APP_ENV=project/<název>`. Kroky projektu:
 
 | Proměnná / háček | Kdy |
 |---|---|

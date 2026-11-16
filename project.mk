@@ -69,9 +69,14 @@ _prepare: clear _install build
 
 clear: _clear-opcache _clear-temp _clear-autoload
 
+# Projektové kroky po instalaci (založení a nalití DB apod.): init-after:: v makefilu projektu
 init:
 	$(MAKE) --no-print-directory _install
 	$(MAKE) --no-print-directory build
+	$(MAKE) --no-print-directory init-after
+.PHONY: init-after
+init-after::
+	@:
 
 # Composer image ext-* ignoruje a runtime image na serveru přestavuje root, ne deploy - release
 # s novým rozšířením musí spadnout tady, ne až za běhu (bin/check-extensions.php). 0 = vypnuto.
@@ -136,8 +141,9 @@ MIGRATIONS_LABEL ?= $(APP_ENV)
 # před ním vypíše "== $(1): <p> ==". Proměnná pro make v podřízeném volání: $$APP_ENV_ARG.
 # První chyba ukončí celý cíl. Subshell nesmí být v `( ... ) || exit`: v seznamu s || bash set -e
 # uvnitř ignoruje a chyba migrace by prošla - výsledek se proto kontroluje až po něm.
+# PROJECTS z .env může mít uvozovky (PROJECTS="a b" kvůli `source .env`) - pryč s nimi.
 define for_each_project
-	@for p in $(or $(PROJECTS),.); do ( \
+	@for p in $(or $(subst ",,$(PROJECTS)),.); do ( \
 		set -e; APP_ENV_ARG=; \
 		if [ "$$p" != . ]; then export APP_ENV=project/$$p; APP_ENV_ARG="APP_ENV=project/$$p"; echo "== $(1): $$p =="; fi; \
 		$(2) \
