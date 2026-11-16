@@ -325,8 +325,10 @@ test-prepare:
 # Výstup jde do souboru a vypisuje se až po doběhnutí - pipe do tee by exit kód přepsal tee-em.
 AUDIT_NETWORK_ERRORS = RequestError|Timeout awaiting|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up
 .PHONY: audit sbom sbom-check
+# --abandoned=report: opuštěné balíčky jen vypíše (Composer 2.6+ na ně jinak vrací chybu), audit má
+# hlídat zranitelnosti; náhrada opuštěného balíčku je práce pro vývoj, ne důvod blokovat pipeline
 audit:
-	$(COMPOSER_BIN) audit --locked
+	$(COMPOSER_BIN) audit --locked --abandoned=report
 	@out=$$(mktemp); \
 	for i in 1 2 3; do \
 		if $(YARN) npm audit --all --severity info > $$out 2>&1; then \
