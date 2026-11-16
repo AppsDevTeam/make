@@ -8,7 +8,9 @@ projektech.
 Není to composer balíček: část cílů běží dřív, než existuje `vendor/` (`make config` na čerstvém
 checkoutu), a `docker/makefile` pouští na serveru root v `~/docker`, kde `vendor/` není vůbec.
 Makefile si proto tag stáhne sám (GitHub archiv, `curl` nebo `wget`) do `.make/<verze>/` vedle sebe
-a make se po stažení spustí znovu.
+a make se po stažení spustí znovu. Před rozbalením ověří SHA256 archivu proti `ADT_MAKE_SHA256`:
+stažený kód se spouští u vývojářů, v CI i na serverech, takže přepsaný tag nebo převzatý GitHub
+účet nesmí podstrčit jiný obsah. Bez otisku nebo s nesouhlasným otiskem make skončí chybou.
 
 ## Zapojení
 
@@ -16,7 +18,11 @@ a make se po stažení spustí znovu.
 
 ```
 ADT_MAKE_VERSION=1.0.0
+ADT_MAKE_SHA256=<sha256 archivu tagu>
 ```
+
+Verze se bumpuje vždy i s otiskem (je i v popisu GitHub releasu každé verze):
+`curl -fsSL https://github.com/AppsDevTeam/make/archive/refs/tags/v<verze>.tar.gz | shasum -a 256`
 
 `.gitignore`:
 
@@ -34,6 +40,9 @@ export
 ifndef ADT_MAKE_VERSION
 ADT_MAKE_VERSION := $(shell sed -n 's/^ADT_MAKE_VERSION=//p' config/.env.common)
 endif
+ifndef ADT_MAKE_SHA256
+ADT_MAKE_SHA256 := $(shell sed -n 's/^ADT_MAKE_SHA256=//p' config/.env.common)
+endif
 
 # ... nastavení a cíle projektu ...
 
@@ -44,7 +53,9 @@ ADT_MAKE_DIR := $(or $(ADT_MAKE_DEV),.make/$(or $(ADT_MAKE_VERSION),$(error ADT_
 include $(ADT_MAKE_DIR)/root.mk
 .make/%/root.mk:
 	@echo "adt/make $*: stahuji do $(CURDIR)/.make/$*" >&2; u=https://github.com/AppsDevTeam/make/archive/refs/tags/v$*.tar.gz; t=$$(mktemp -d); \
-	{ curl -fsSL $$u || wget -qO- $$u; } | tar xzf - -C $$t && mkdir -p .make && rm -rf .make/$* && mv $$t/* .make/$* && rmdir $$t
+	{ curl -fsSL $$u || wget -qO- $$u; } > $$t/a.tgz; s=$$( { sha256sum $$t/a.tgz 2>/dev/null || shasum -a 256 $$t/a.tgz; } | cut -d' ' -f1); \
+	if [ -z "$(ADT_MAKE_SHA256)" ] || [ "$$s" != "$(ADT_MAKE_SHA256)" ]; then echo "adt/make $*: SHA256 archivu $$s neodpovídá ADT_MAKE_SHA256 '$(ADT_MAKE_SHA256)' - nespouštím" >&2; rm -rf $$t; exit 1; fi; \
+	tar xzf $$t/a.tgz -C $$t && rm $$t/a.tgz && mkdir -p .make && rm -rf .make/$* && mv $$t/* .make/$* && rmdir $$t
 ```
 
 `project/makefile` a `docker/makefile` stejně, jen bez čtení `config/.env.common` (verzi mají
@@ -60,7 +71,9 @@ ADT_MAKE_DIR := $(or $(ADT_MAKE_DEV),.make/$(or $(ADT_MAKE_VERSION),$(error ADT_
 include $(ADT_MAKE_DIR)/project.mk
 .make/%/project.mk:
 	@echo "adt/make $*: stahuji do $(CURDIR)/.make/$*" >&2; u=https://github.com/AppsDevTeam/make/archive/refs/tags/v$*.tar.gz; t=$$(mktemp -d); \
-	{ curl -fsSL $$u || wget -qO- $$u; } | tar xzf - -C $$t && mkdir -p .make && rm -rf .make/$* && mv $$t/* .make/$* && rmdir $$t
+	{ curl -fsSL $$u || wget -qO- $$u; } > $$t/a.tgz; s=$$( { sha256sum $$t/a.tgz 2>/dev/null || shasum -a 256 $$t/a.tgz; } | cut -d' ' -f1); \
+	if [ -z "$(ADT_MAKE_SHA256)" ] || [ "$$s" != "$(ADT_MAKE_SHA256)" ]; then echo "adt/make $*: SHA256 archivu $$s neodpovídá ADT_MAKE_SHA256 '$(ADT_MAKE_SHA256)' - nespouštím" >&2; rm -rf $$t; exit 1; fi; \
+	tar xzf $$t/a.tgz -C $$t && rm $$t/a.tgz && mkdir -p .make && rm -rf .make/$* && mv $$t/* .make/$* && rmdir $$t
 ```
 
 Pravidla:
@@ -151,6 +164,8 @@ migrations-before::
 
 ## Kontejnery (`docker.mk`)
 
-`docker-up` (na popředí), `docker-upd`, `docker-upd-no-pull`, `docker-down`,
-`audit-image` (Trivy, `IMAGE`). Lokálně porty na `PROJECT_IP` a volitelná sdílená proxy
+`docker-up` (na popředí), `docker-upd`, `docker-upd-no-pull`, `docker-down` - **jen na stage `local`
+a `ci`**, jinde končí chybou: na serverech kontejnery spravuje `dupd` (adt/docker-binaries, deploy ho
+volá sám; root `dupd -u <projekt> up`), protože `~/docker` patří účtu projektu a root, který v něm
+spustí make, vykoná jeho kód. `audit-image` (Trivy, `IMAGE`). Lokálně porty na `PROJECT_IP` a volitelná sdílená proxy
 adt/local-proxy (`LOCAL_PROXY`, `LOCAL_PROXY_DIR`).

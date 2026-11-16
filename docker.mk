@@ -30,21 +30,31 @@ endif
 ################################################################################
 # TARGETS
 
-.PHONY: docker-down docker-up docker-upd docker-upd-no-pull _docker-upd-no-build audit-image _docker-common
-docker-down:
+.PHONY: docker-down docker-up docker-upd docker-upd-no-pull _docker-upd-no-build audit-image _docker-common _docker-local-only
+docker-down: _docker-local-only
 	$(DOCKER_COMPOSE) down
 
-docker-up: _docker-common
+docker-up: _docker-local-only _docker-common
 	$(DOCKER_COMPOSE) up --force-recreate --build
 
-docker-upd: _docker-common
+docker-upd: _docker-local-only _docker-common
 	$(DOCKER_COMPOSE) up -d --force-recreate --build
 
-docker-upd-no-pull:
+docker-upd-no-pull: _docker-local-only
 	$(DOCKER_COMPOSE) up -d --force-recreate --build
 
-_docker-upd-no-build:
+_docker-upd-no-build: _docker-local-only
 	$(DOCKER_COMPOSE) up -d --force-recreate
+
+# Kontejnery na serverech spravuje dupd (adt/docker-binaries: `sudo dupd build|up` z účtu
+# projektu, root `dupd -u <projekt> up`, deploy ho volá sám), ne tyhle cíle. ~/docker (makefile,
+# .env, compose, .make/) patří účtu projektu: root, který v něm spustí make nebo docker compose,
+# vykoná kód, který mohl účet upravit - eskalace na roota. Mimo local a ci proto končí chybou.
+_docker-local-only:
+	@if [ "$(STAGE)" != local ] && [ "$(STAGE)" != ci ]; then \
+		echo "make $(MAKECMDGOALS): na stage $(STAGE) kontejnery spravuje dupd - sudo dupd build && sudo dupd up (root: dupd -u <projekt> up), viz README adt/docker-binaries" >&2; \
+		exit 1; \
+	fi
 
 ################################################################################
 # TARGETS — bezpečnost
