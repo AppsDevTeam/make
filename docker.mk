@@ -65,17 +65,23 @@ _docker-local-only:
 # Když cíl začne padat, řeší se to v Dockerfile (nebo novější verzí base image), ne výjimkou.
 # IMAGE lze přepsat: make audit-image IMAGE=$CI_REGISTRY_IMAGE/php:master
 IMAGE ?= $(PROJECT_NAME)-php:latest
+# Pevná verze a digest (plovoucí latest by do auditu podstrčil cokoli). Trivy nedostane socket
+# Dockeru (s ním by měl root nad celým hostem) - skenuje archiv z `docker save`, jen pro čtení.
+# Archiv v adresáři projektu, ne v /tmp: v CI démon běží v dind službě a /tmp jobu nevidí.
+TRIVY_IMAGE ?= aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
 audit-image:
+	@tmp=$$(mktemp -d "$(CURDIR)/.audit-image.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
+	docker save $(IMAGE) -o "$$tmp/image.tar" && chmod -R a+rX "$$tmp" && \
 	docker run --rm \
-		-v /var/run/docker.sock:/var/run/docker.sock \
+		-v "$$tmp/image.tar:/image.tar:ro" \
 		-v trivy-cache:/root/.cache \
-		aquasec/trivy:latest image \
+		$(TRIVY_IMAGE) image \
+		--input /image.tar \
 		--scanners vuln \
 		--severity HIGH,CRITICAL \
 		--ignore-unfixed \
 		--skip-version-check \
-		--exit-code 1 \
-		$(IMAGE)
+		--exit-code 1
 
 ################################################################################
 # HELPERS
