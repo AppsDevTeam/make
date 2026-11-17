@@ -90,12 +90,14 @@ _env:
 
 	@# Skládá se do dočasného souboru - když SOPS neumí některou vrstvu rozšifrovat,
 	@# zůstane stávající .env nedotčený místo aby se useknul na půlce
-	@set -e; tmp=".env.tmp"; \
+	@# umask 077: .env obsahují rozšifrované secrets - 0644 by je na sdíleném hostu četly
+	@# i ostatní účty (soubor čte jen projektový účet a kontejnery pod jeho UID)
+	@set -e; umask 077; tmp=".env.tmp"; \
 	cat config/.env.common > $$tmp; \
 	printf '\n\n' >> $$tmp && $(SUBMAKE) _sops-cat FILE=config/.env.$(STAGE) >> $$tmp; \
 	mv -f $$tmp .env
 
-	@set -e; for dir in docker project; do \
+	@set -e; umask 077; for dir in docker project; do \
 		tmp="$$dir/.env.tmp"; \
 		cat config/.env.common > $$tmp; \
 		printf '\n\n' >> $$tmp && cat config/$$dir/.env.common >> $$tmp; \
@@ -107,7 +109,7 @@ _env:
 	@# Zašifrované JSON soubory v config/project (SOPS) - rozšifrují se do pracovní
 	@# kopie vedle ostatních configů. Kdo klíč rozšifrovat neumí (není mezi příjemci
 	@# v .sops.yaml), nechá si stávající soubor, make kvůli tomu nespadne.
-	@for src in $$(find config/project -type f -name "*.json"); do \
+	@umask 077; for src in $$(find config/project -type f -name "*.json"); do \
 		grep -q '"sops"' "$$src" 2>/dev/null || continue; \
 		dest="project/$${src#config/project/}"; \
 		if $(SOPS) decrypt "$$src" > "$$dest.tmp" 2>/dev/null; then \
@@ -330,7 +332,9 @@ release-notes:
 		python3 $(ADT_MAKE_SELF)bin/release-notes.py "$$VERSION" "$(RELEASE_NOTES)" "$(RELEASE_NOTES_MODEL)"; \
 	else \
 		command -v claude >/dev/null || { echo "claude CLI není nainstalované (nebo nastav ANTHROPIC_API_KEY)"; exit 1; }; \
-		USER=$$(id -un) claude -p "/release-notes $$VERSION" --permission-mode acceptEdits; \
+		USER=$$(id -un) claude -p "/release-notes $$VERSION" --allowedTools "Edit($(RELEASE_NOTES))"; \
+		changed=$$(git status --porcelain | grep -v " $(RELEASE_NOTES)$$" || true); \
+		[ -z "$$changed" ] || { printf 'Claude změnil i jiné soubory než $(RELEASE_NOTES) - zkontroluj:\n%s\n' "$$changed" >&2; exit 1; }; \
 	fi
 
 release:
