@@ -385,27 +385,19 @@ sbom-check: sbom
 ################################################################################
 # Debug režim na serverech
 
-# Klíč vývojáře a cookie nette-debug (ADT\DebugToken z adt/configurator ≥ 7). Na serveru je jen veřejný
-# klíč (APP_DEVELOPERS), privátní zůstává v DEBUG_KEY na počítači vývojáře a do jednorázového kontejneru
-# bez sítě jde jen přes stdin. Token platí pro jednu doménu a HOURS hodin (nejvýš 168).
-DEBUG_KEY ?= $(HOME)/.config/adt/debug-key
+# Cookie nette-debug (ADT\DebugToken z adt/configurator ≥ 7.1): text s expirací a doménou podepíše
+# SSH klíč vývojáře přes ssh-agenta (ssh-keygen -Y sign), privátní klíč z počítače neodejde. Bez DOMAIN
+# platí pro všechny domény, DAYS nejvýš 366. Server ho přijme jen od vývojáře s veřejným klíčem
+# v APP_DEVELOPERS a jen z IP, kterou povolí edge proxy (NGINX_PROXY_DEBUG_IPS).
+DEBUG_SSH_KEY ?= $(HOME)/.ssh/id_ed25519.pub
 DEBUG_TOKEN_RUN = docker run --rm -i --network none --entrypoint php \
 	-v $(CURDIR)/vendor/adt/configurator:/configurator:ro appsdevteam/php:$(PHP_IMAGE)-composer /configurator/bin/debug-token
-.PHONY: debug-key debug-token
-debug-key:
-	@[ -f vendor/adt/configurator/bin/debug-token ] || { echo "Chybí adt/configurator ≥ 7 ve vendor/ - make init" >&2; exit 1; }
-	@if [ ! -s "$(DEBUG_KEY)" ]; then \
-		[ -n "$(SLUG)" ] || { echo "make debug-key SLUG=JmenoPrijmeni" >&2; exit 1; }; \
-		mkdir -p "$$(dirname "$(DEBUG_KEY)")" && umask 077 && \
-		$(DEBUG_TOKEN_RUN) new "$(SLUG)" > "$(DEBUG_KEY).tmp" && mv "$(DEBUG_KEY).tmp" "$(DEBUG_KEY)" || exit 1; \
-		echo "Privátní klíč: $(DEBUG_KEY) (nikomu nedávat, nikam necommitovat)"; \
-	fi; \
-	echo "Veřejný klíč - řádek do APP_DEVELOPERS (config/project/.env.common projektů):"; \
-	$(DEBUG_TOKEN_RUN) public < "$(DEBUG_KEY)"
-
+.PHONY: debug-token
 debug-token:
-	@[ -n "$(DOMAIN)" ] || { echo "make debug-token DOMAIN=www.projekt.cz [HOURS=12]" >&2; exit 1; }
-	@[ -s "$(DEBUG_KEY)" ] || { echo "Chybí $(DEBUG_KEY) - nejdřív make debug-key SLUG=JmenoPrijmeni" >&2; exit 1; }
-	@$(DEBUG_TOKEN_RUN) token "$(DOMAIN)" "$(or $(HOURS),12)" < "$(DEBUG_KEY)"
+	@[ -f vendor/adt/configurator/bin/debug-token ] || { echo "Chybí adt/configurator ≥ 7.1 ve vendor/ - make init" >&2; exit 1; }
+	@host='$(or $(DOMAIN),*)'; expiry=$$(( $$(date +%s) + $(or $(DAYS),365) * 86400 )); \
+	sig=$$($(DEBUG_TOKEN_RUN) message $$expiry "$$host" | ssh-keygen -Y sign -n nette-debug -f "$(DEBUG_SSH_KEY)") || { \
+		echo "Podpis selhal - je klíč $(DEBUG_SSH_KEY) v ssh-agentovi? (ssh-add --apple-use-keychain)" >&2; exit 1; }; \
+	printf '%s\n' "$$sig" | $(DEBUG_TOKEN_RUN) token $$expiry "$$host"
 
 include $(ADT_MAKE_SELF)end.mk

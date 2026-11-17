@@ -8,7 +8,7 @@ SOPS ?= $(SUDO) sops
 
 # Cíle, které jen přeposílá do project/ a docker/. Projekt přidá svoje přes PROJECT_MAKE_TARGETS
 # a DOCKER_MAKE_TARGETS (definované před include).
-ADT_PROJECT_TARGETS = analyse analyse-cs analyse-cs-fix analyse-sc audit build checkout clear debug-key debug-token init \
+ADT_PROJECT_TARGETS = analyse analyse-cs analyse-cs-fix analyse-sc audit build checkout clear debug-token init \
 	migrations migrations-diff reload-consumers sbom sbom-check test test-acceptance test-acceptance-retry \
 	test-coverage test-crawler test-prepare test-suite test-unit watch
 ADT_DOCKER_TARGETS = audit-image docker-down docker-up docker-upd docker-upd-no-pull _docker-upd-no-build
