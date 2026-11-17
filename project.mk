@@ -385,7 +385,7 @@ sbom-check: sbom
 ################################################################################
 # Debug režim na serverech
 
-# Cookie nette-debug (ADT\DebugToken z adt/configurator ≥ 7.1): text s expirací a doménou podepíše
+# Cookie app-debug (ADT\DebugToken z adt/configurator ≥ 7.2): text s expirací a doménou podepíše
 # SSH klíč vývojáře přes ssh-agenta (ssh-keygen -Y sign), privátní klíč z počítače neodejde. Bez DOMAIN
 # platí pro všechny domény, DAYS nejvýš 366. Server ho přijme jen od vývojáře s veřejným klíčem
 # v APP_DEVELOPERS a jen z IP, kterou povolí edge proxy (NGINX_PROXY_DEBUG_IPS).
@@ -394,9 +394,9 @@ DEBUG_TOKEN_RUN = docker run --rm -i --network none --entrypoint php \
 	-v $(CURDIR)/vendor/adt/configurator:/configurator:ro appsdevteam/php:$(PHP_IMAGE)-composer /configurator/bin/debug-token
 .PHONY: debug-token
 debug-token:
-	@[ -f vendor/adt/configurator/bin/debug-token ] || { echo "Chybí adt/configurator ≥ 7.1 ve vendor/ - make init" >&2; exit 1; }
+	@[ -f vendor/adt/configurator/bin/debug-token ] || { echo "Chybí adt/configurator ≥ 7.2 ve vendor/ - make init" >&2; exit 1; }
 	@host='$(or $(DOMAIN),*)'; expiry=$$(( $$(date +%s) + $(or $(DAYS),365) * 86400 )); \
-	sig=$$($(DEBUG_TOKEN_RUN) message $$expiry "$$host" | ssh-keygen -Y sign -n nette-debug -f "$(DEBUG_SSH_KEY)") || { \
+	sig=$$($(DEBUG_TOKEN_RUN) message $$expiry "$$host" | ssh-keygen -Y sign -n app-debug -f "$(DEBUG_SSH_KEY)") || { \
 		echo "Podpis selhal - je klíč $(DEBUG_SSH_KEY) v ssh-agentovi? (ssh-add --apple-use-keychain)" >&2; exit 1; }; \
 	printf '%s\n' "$$sig" | $(DEBUG_TOKEN_RUN) token $$expiry "$$host"
 
