@@ -161,9 +161,10 @@ SOPS_STAGE_GLOB = $(if $(filter-out all,$(SECRETS_STAGE)),.env.$(SECRETS_STAGE),
 # .env.common je sdílený nešifrovaný základ, do šifrování nepatří.
 # Projekt může zúžit (override SOPS_FILES = ...), např. nešifrovat config/.env.local a .env.ci.
 SOPS_FILES ?= $(shell find ./config -type f -name "*$(SOPS_STAGE_GLOB)" ! -name "*.env.common")
-# Kontrola v pre-commit hooku (_secrets-check) - default všechny stage. Projekt, který šifruje
-# jen některé (hesla dockerové DB local a ci v plaintextu), ho zúží.
-SOPS_CHECK_FILES ?= $(shell find ./config -type f -name "*.env.*" ! -name "*.env.common")
+# Kontrola v pre-commit hooku (_secrets-check) - default všechny stage i .env.common (ten se
+# nešifruje, secret v něm je chyba). Projekt, který šifruje jen některé (hesla dockerové DB local
+# a ci v plaintextu), ho zúží.
+SOPS_CHECK_FILES ?= $(shell find ./config -type f -name "*.env.*")
 # `export` v makefilu projektu by find pouštěl u každého řádku každého receptu
 unexport SOPS_FILES SOPS_CHECK_FILES
 
@@ -214,20 +215,37 @@ _secrets-stage-check:
 		exit 1; \
 	fi
 
-# Kontrola v pre-commit hooku - projíždí SOPS_CHECK_FILES bez ohledu na SECRETS_STAGE.
-# Vzor citlivých jmen musí sedět s encrypted_regex v .sops.yaml, jinak se obě strany
-# rozejdou: buď hook pustí do gitu plaintext, který SOPS nešifruje, nebo naopak
-# spadne na proměnné, kterou zašifrovat neumí.
-# Hlídá se hodnota, ne jen název: `API_KEY=` bez hodnoty je placeholder, `API_KEY=abc`
-# je secret, který do gitu nepatří.
-SECRETS_PATTERN ?= ^[A-Za-z0-9_]*(PASSWORD|SECRET|TOKEN|KEY|PRIVATE)[A-Za-z0-9_]*=..*
+# Kontrola v pre-commit hooku - projíždí SOPS_CHECK_FILES bez ohledu na SECRETS_STAGE, řádek
+# po řádku: proměnná s citlivým jménem (SECRETS_KEYS, bez ohledu na velikost písmen) a neprázdnou
+# hodnotou musí být ENC[...]. Po řádcích, ne po souborech - s mac_only_encrypted by jinak prošla
+# nová nezašifrovaná hodnota dopsaná do už zašifrovaného souboru. SECRETS_KEYS musí sedět
+# s encrypted_regex v .sops.yaml (`(?i)(...)` se stejným výčtem), jinak hook pustí do gitu
+# plaintext, který SOPS nešifruje, nebo spadne na proměnné, kterou zašifrovat neumí. Výjimky
+# (veřejné "klíče" typu RECAPTCHA_SITE_KEY) dá projekt do SECRETS_ALLOW (regex celých jmen).
+# Vypisuje jen soubor a jméno proměnné, hodnotu ne. Ostatní soubory hlídá gitleaks (_gitleaks-staged).
+SECRETS_KEYS ?= PASS|PWD|SECRET|TOKEN|KEY|PRIVATE|DSN|AUTH|SALT|COOKIE
+SECRETS_ALLOW ?=
 _secrets-check:
-	@for file in $(SOPS_CHECK_FILES); do \
-		if ! grep -q "sops_mac" "$$file" 2>/dev/null && grep -qE "$(SECRETS_PATTERN)" "$$file" 2>/dev/null; then \
-			echo "WARNING: $$file contains unencrypted sensitive data"; \
-			exit 1; \
-		fi; \
-	done
+	@found=$$(for file in $(SOPS_CHECK_FILES); do \
+		grep -iE '^[A-Za-z0-9_]*($(SECRETS_KEYS))[A-Za-z0-9_]*=.' "$$file" 2>/dev/null | grep -v '=ENC\[' \
+			| cut -d= -f1 $(if $(SECRETS_ALLOW),| grep -vxE '$(SECRETS_ALLOW)') | sed "s|^|$$file: |"; \
+	done); \
+	if [ -n "$$found" ]; then \
+		printf 'Nezašifrované citlivé hodnoty (make secrets-encrypt SECRETS_STAGE=<stage>):\n%s\n' "$$found"; exit 1; \
+	fi
+
+# Gitleaks (známé formáty tokenů a klíčů) nad staged změnami - pokryje i soubory mimo config/
+# (.yarnrc.yml, .npmrc, neon, compose). Bez sítě, repo jen pro čtení, hodnoty v hlášení redigované.
+# secrets-scan totéž nad rozsahem commitů (CI: SECRETS_SCAN_RANGE=<base>..HEAD, prázdný = celá historie).
+GITLEAKS_IMAGE ?= zricethezav/gitleaks:v8.30.1
+# safe.directory: v CI (dind) patří repo jinému uživateli než procesu v kontejneru a git by odmítl číst
+GITLEAKS = docker run --rm --network none -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory \
+	-e GIT_CONFIG_VALUE_0='*' -v "$(CURDIR):/repo:ro" $(GITLEAKS_IMAGE)
+.PHONY: _gitleaks-staged secrets-scan
+_gitleaks-staged:
+	@$(GITLEAKS) git --pre-commit --staged --redact --verbose --no-banner /repo
+secrets-scan:
+	@$(GITLEAKS) git --redact --verbose --no-banner $(if $(SECRETS_SCAN_RANGE),--log-opts="$(SECRETS_SCAN_RANGE)") /repo
 
 _sops-cat:
 	@if [ -f "$(FILE)" ]; then \
@@ -248,7 +266,7 @@ _sops-cat:
 # výstup kontroly se vypíše jen při chybě, commit projde, jen když prošly všechny. Projekt
 # seznam mění před include, např. `PRE_COMMIT_CHECKS += analyse-deps`.
 PRE_COMMIT_FIX ?= analyse-cs-fix
-PRE_COMMIT_CHECKS ?= analyse-cs analyse-sc test-coverage _secrets-check
+PRE_COMMIT_CHECKS ?= analyse-cs analyse-sc test-coverage _secrets-check _gitleaks-staged
 
 # Soubory, které oprava změnila, se musí dostat i do commitu - git commituje index, ne pracovní
 # adresář, a kontroly běží nad pracovním adresářem: neopravená verze by jinak prošla do gitu.
