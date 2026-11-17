@@ -89,16 +89,19 @@ _env:
 	@find docker/php/usr/local/etc/php/conf.d -name 'default.*.ini' ! -name 'default.$(STAGE).ini' -delete 2>/dev/null || true
 
 	@# Skládá se do dočasného souboru - když SOPS neumí některou vrstvu rozšifrovat,
-	@# zůstane stávající .env nedotčený místo aby se useknul na půlce
+	@# zůstane stávající .env nedotčený místo aby se useknul na půlce. Dočasný soubor obsahuje
+	@# rozšifrované secrets a v gitignore projektu není: mktemp (0600) a smazání i při pádu nebo Ctrl+C.
 	@# umask 077: .env obsahují rozšifrované secrets - 0644 by je na sdíleném hostu četly
 	@# i ostatní účty (soubor čte jen projektový účet a kontejnery pod jeho UID)
-	@set -e; umask 077; tmp=".env.tmp"; \
+	@set -e; umask 077; tmp=; trap 'rm -f "$$tmp"' EXIT; trap 'exit 1' INT TERM HUP; \
+	tmp=$$(mktemp .env.tmp.XXXXXX); \
 	cat config/.env.common > $$tmp; \
 	printf '\n\n' >> $$tmp && $(SUBMAKE) _sops-cat FILE=config/.env.$(STAGE) >> $$tmp; \
 	mv -f $$tmp .env
 
-	@set -e; umask 077; for dir in docker project; do \
-		tmp="$$dir/.env.tmp"; \
+	@set -e; umask 077; tmp=; trap 'rm -f "$$tmp"' EXIT; trap 'exit 1' INT TERM HUP; \
+	for dir in docker project; do \
+		tmp=$$(mktemp "$$dir/.env.tmp.XXXXXX"); \
 		cat config/.env.common > $$tmp; \
 		printf '\n\n' >> $$tmp && cat config/$$dir/.env.common >> $$tmp; \
 		printf '\n\n' >> $$tmp && $(SUBMAKE) _sops-cat FILE=config/.env.$(STAGE) >> $$tmp; \
@@ -109,13 +112,15 @@ _env:
 	@# Zašifrované JSON soubory v config/project (SOPS) - rozšifrují se do pracovní
 	@# kopie vedle ostatních configů. Kdo klíč rozšifrovat neumí (není mezi příjemci
 	@# v .sops.yaml), nechá si stávající soubor, make kvůli tomu nespadne.
-	@umask 077; for src in $$(find config/project -type f -name "*.json"); do \
+	@umask 077; tmp=; trap 'rm -f "$$tmp"' EXIT; trap 'exit 1' INT TERM HUP; \
+	for src in $$(find config/project -type f -name "*.json"); do \
 		grep -q '"sops"' "$$src" 2>/dev/null || continue; \
 		dest="project/$${src#config/project/}"; \
-		if $(SOPS) decrypt "$$src" > "$$dest.tmp" 2>/dev/null; then \
-			mv -f "$$dest.tmp" "$$dest"; \
+		tmp="$$dest.tmp"; \
+		if $(SOPS) decrypt "$$src" > "$$tmp" 2>/dev/null; then \
+			mv -f "$$tmp" "$$dest"; \
 		else \
-			rm -f "$$dest.tmp"; \
+			rm -f "$$tmp"; \
 			echo "Nepodarilo se rozsifrovat $$src (tvuj SSH klic neni v .sops.yaml?) - ponechavam $$dest" >&2; \
 		fi; \
 	done
@@ -164,10 +169,10 @@ SOPS_STAGE_GLOB = $(if $(filter-out all,$(SECRETS_STAGE)),.env.$(SECRETS_STAGE),
 # Projekt může zúžit (override SOPS_FILES = ...), např. nešifrovat config/.env.local a .env.ci.
 SOPS_FILES ?= $(shell find ./config -type f -name "*$(SOPS_STAGE_GLOB)" ! -name "*.env.common")
 # Kontrola v pre-commit hooku (_secrets-check) - default všechny stage i .env.common (ten se
-# nešifruje, secret v něm je chyba). Projekt, který šifruje jen některé (hesla dockerové DB local
-# a ci v plaintextu), ho zúží.
-SOPS_CHECK_FILES ?= $(shell find ./config -type f -name "*.env.*")
-# `export` v makefilu projektu by find pouštěl u každého řádku každého receptu
+# nešifruje, secret v něm je chyba), soubory z indexu gitu (`*` v pathspec bere i podadresáře).
+# Projekt, který šifruje jen některé (hesla dockerové DB local a ci v plaintextu), ho zúží.
+SOPS_CHECK_FILES ?= $(shell git ls-files -- 'config/*.env.*' 2>/dev/null)
+# `export` v makefilu projektu by find a git ls-files pouštěl u každého řádku každého receptu
 unexport SOPS_FILES SOPS_CHECK_FILES
 
 # Použití: make secrets-decrypt [SECRETS_STAGE=<stage>|all] - bez parametru aktuální STAGE.
@@ -218,28 +223,36 @@ _secrets-stage-check:
 	fi
 
 # Kontrola v pre-commit hooku - projíždí SOPS_CHECK_FILES bez ohledu na SECRETS_STAGE, řádek
-# po řádku: proměnná s citlivým jménem (SECRETS_KEYS, bez ohledu na velikost písmen) a neprázdnou
-# hodnotou musí být ENC[...]. Po řádcích, ne po souborech - s mac_only_encrypted by jinak prošla
-# nová nezašifrovaná hodnota dopsaná do už zašifrovaného souboru. SECRETS_KEYS musí sedět
-# s encrypted_regex v .sops.yaml (`(?i)(...)` se stejným výčtem), jinak hook pustí do gitu
-# plaintext, který SOPS nešifruje, nebo spadne na proměnné, kterou zašifrovat neumí. Výjimky
-# (veřejné "klíče" typu RECAPTCHA_SITE_KEY) dá projekt do SECRETS_ALLOW (regex celých jmen).
-# Vypisuje jen soubor a jméno proměnné, hodnotu ne. Ostatní soubory hlídá gitleaks (_gitleaks-staged).
+# po řádku: proměnná s citlivým jménem (SECRETS_KEYS, bez ohledu na velikost písmen, i s `export `
+# a mezerami kolem `=`) a neprázdnou hodnotou musí být ENC[...]. Čte obsah z indexu (git show :<soubor>),
+# ne z pracovního adresáře: git commituje index - stagnutý plaintext, který se pak zašifroval jen
+# na disku, by jinak prošel. Soubor mimo index se necommituje, přeskočí se. Po řádcích, ne po
+# souborech - s mac_only_encrypted by jinak prošla nová nezašifrovaná hodnota dopsaná do už
+# zašifrovaného souboru. SECRETS_KEYS musí sedět s encrypted_regex v .sops.yaml (`(?i)(...)` se
+# stejným výčtem), jinak hook pustí do gitu plaintext, který SOPS nešifruje, nebo spadne na
+# proměnné, kterou zašifrovat neumí. Výjimky (veřejné "klíče" typu RECAPTCHA_SITE_KEY) dá projekt
+# do SECRETS_ALLOW (regex celých jmen). Vypisuje jen soubor a jméno proměnné, hodnotu ne. Ostatní
+# soubory hlídá gitleaks (_gitleaks-staged).
 SECRETS_KEYS ?= PASS|PWD|SECRET|TOKEN|KEY|PRIVATE|DSN|AUTH|SALT|COOKIE
 SECRETS_ALLOW ?=
+SECRETS_LINE_PREFIX = ^[[:space:]]*(export[[:space:]]+)?
 _secrets-check:
 	@found=$$(for file in $(SOPS_CHECK_FILES); do \
-		grep -iE '^[A-Za-z0-9_]*($(SECRETS_KEYS))[A-Za-z0-9_]*=.' "$$file" 2>/dev/null | grep -v '=ENC\[' \
-			| cut -d= -f1 $(if $(SECRETS_ALLOW),| grep -vxE '$(SECRETS_ALLOW)') | sed "s|^|$$file: |"; \
+		git show ":$$file" 2>/dev/null \
+			| grep -iE '$(SECRETS_LINE_PREFIX)[A-Za-z0-9_]*($(SECRETS_KEYS))[A-Za-z0-9_]*[[:space:]]*=[[:space:]]*[^[:space:]]' \
+			| grep -vE '=[[:space:]]*ENC\[' \
+			| sed -E 's/$(SECRETS_LINE_PREFIX)([A-Za-z0-9_]+).*/\2/' \
+			$(if $(SECRETS_ALLOW),| grep -vxE '$(SECRETS_ALLOW)') | sed "s|^|$$file: |"; \
 	done); \
 	if [ -n "$$found" ]; then \
-		printf 'Nezašifrované citlivé hodnoty (make secrets-encrypt SECRETS_STAGE=<stage>):\n%s\n' "$$found"; exit 1; \
+		printf 'Nezašifrované citlivé hodnoty ve stagnutém obsahu (make secrets-encrypt SECRETS_STAGE=<stage>, pak git add):\n%s\n' "$$found"; exit 1; \
 	fi
 
 # Gitleaks (známé formáty tokenů a klíčů) nad staged změnami - pokryje i soubory mimo config/
 # (.yarnrc.yml, .npmrc, neon, compose). Bez sítě, repo jen pro čtení, hodnoty v hlášení redigované.
 # secrets-scan totéž nad rozsahem commitů (CI: SECRETS_SCAN_RANGE=<base>..HEAD, prázdný = celá historie).
-GITLEAKS_IMAGE ?= zricethezav/gitleaks:v8.30.1
+# Pevná verze a digest jako TRIVY_IMAGE (přepsaný tag by do hooku podstrčil cokoli)
+GITLEAKS_IMAGE ?= zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
 # safe.directory: v CI (dind) patří repo jinému uživateli než procesu v kontejneru a git by odmítl číst
 GITLEAKS = docker run --rm --network none -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory \
 	-e GIT_CONFIG_VALUE_0='*' -v "$(CURDIR):/repo:ro" $(GITLEAKS_IMAGE)
@@ -346,7 +359,7 @@ release:
 	LAST_TAG=$$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true); \
 	VERSION=$$($(release_version)); \
 	echo "Poslední tag: $${LAST_TAG:-žádný} -> nový release: $$VERSION"; \
-	$(MAKE) --no-print-directory release-notes VERSION=$$VERSION; \
+	$(SUBMAKE) release-notes VERSION=$$VERSION; \
 	if [ -d project/sbom ]; then $(SUBMAKE) sbom; git status --short project/sbom/; fi; \
 	git --no-pager diff $(RELEASE_NOTES); \
 	echo -n "Je release $$VERSION v pořádku? [y/N] " && read ans && [ "$${ans:-N}" = y ]; \
