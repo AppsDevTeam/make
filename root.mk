@@ -169,9 +169,10 @@ SOPS_STAGE_GLOB = $(if $(filter-out all,$(SECRETS_STAGE)),.env.$(SECRETS_STAGE),
 # Projekt může zúžit (override SOPS_FILES = ...), např. nešifrovat config/.env.local a .env.ci.
 SOPS_FILES ?= $(shell find ./config -type f -name "*$(SOPS_STAGE_GLOB)" ! -name "*.env.common")
 # Kontrola v pre-commit hooku (_secrets-check) - default všechny stage i .env.common (ten se
-# nešifruje, secret v něm je chyba), soubory z indexu gitu (`*` v pathspec bere i podadresáře).
+# nešifruje, secret v něm je chyba), soubory z indexu gitu i nové nesledované (ruční kontrola před
+# `git add`), `*` v pathspec bere i podadresáře.
 # Projekt, který šifruje jen některé (hesla dockerové DB local a ci v plaintextu), ho zúží.
-SOPS_CHECK_FILES ?= $(shell git ls-files -- 'config/*.env.*' 2>/dev/null)
+SOPS_CHECK_FILES ?= $(shell git ls-files --cached --others --exclude-standard -- 'config/*.env.*' 2>/dev/null)
 # `export` v makefilu projektu by find a git ls-files pouštěl u každého řádku každého receptu
 unexport SOPS_FILES SOPS_CHECK_FILES
 
@@ -222,30 +223,44 @@ _secrets-stage-check:
 		exit 1; \
 	fi
 
-# Kontrola v pre-commit hooku - projíždí SOPS_CHECK_FILES bez ohledu na SECRETS_STAGE, řádek
+# Kontrola citlivých hodnot - projíždí SOPS_CHECK_FILES bez ohledu na SECRETS_STAGE, řádek
 # po řádku: proměnná s citlivým jménem (SECRETS_KEYS, bez ohledu na velikost písmen, i s `export `
-# a mezerami kolem `=`) a neprázdnou hodnotou musí být ENC[...]. Čte obsah z indexu (git show :<soubor>),
-# ne z pracovního adresáře: git commituje index - stagnutý plaintext, který se pak zašifroval jen
-# na disku, by jinak prošel. Soubor mimo index se necommituje, přeskočí se. Po řádcích, ne po
-# souborech - s mac_only_encrypted by jinak prošla nová nezašifrovaná hodnota dopsaná do už
-# zašifrovaného souboru. SECRETS_KEYS musí sedět s encrypted_regex v .sops.yaml (`(?i)(...)` se
-# stejným výčtem), jinak hook pustí do gitu plaintext, který SOPS nešifruje, nebo spadne na
-# proměnné, kterou zašifrovat neumí. Výjimky (veřejné "klíče" typu RECAPTCHA_SITE_KEY) dá projekt
-# do SECRETS_ALLOW (regex celých jmen). Vypisuje jen soubor a jméno proměnné, hodnotu ne. Ostatní
-# soubory hlídá gitleaks (_gitleaks-staged).
+# a mezerami kolem `=`) a neprázdnou hodnotou musí mít hodnotu ENC[...] (celou, volitelně v uvozovkách).
+# Posuzuje se hodnota za prvním `=`, ne celý řádek - `HESLO=plain # =ENC[` jinak prošlo.
+# SECRETS_CHECK_SOURCE: `worktree` (default, ruční spuštění před stagnutím) čte pracovní adresář,
+# `index` (nastavuje cíl pre-commit) obsah z indexu (git show :<soubor>) - git commituje index,
+# stagnutý plaintext, který se pak zašifroval jen na disku, by jinak prošel; soubor mimo index se
+# přeskočí. Po řádcích, ne po souborech - s mac_only_encrypted by jinak prošla nová nezašifrovaná
+# hodnota dopsaná do už zašifrovaného souboru. SECRETS_KEYS musí sedět s encrypted_regex v .sops.yaml
+# (`(?i)(...)` se stejným výčtem), jinak hook pustí do gitu plaintext, který SOPS nešifruje, nebo
+# spadne na proměnné, kterou zašifrovat neumí. Výjimky (veřejné "klíče" typu RECAPTCHA_SITE_KEY)
+# dá projekt do SECRETS_ALLOW (regex celých jmen). Vypisuje jen soubor a jméno proměnné, hodnotu ne.
+# Ostatní soubory hlídá gitleaks (_gitleaks-staged).
 SECRETS_KEYS ?= PASS|PWD|SECRET|TOKEN|KEY|PRIVATE|DSN|AUTH|SALT|COOKIE
 SECRETS_ALLOW ?=
+SECRETS_CHECK_SOURCE ?= worktree
 SECRETS_LINE_PREFIX = ^[[:space:]]*(export[[:space:]]+)?
 _secrets-check:
-	@found=$$(for file in $(SOPS_CHECK_FILES); do \
-		git show ":$$file" 2>/dev/null \
-			| grep -iE '$(SECRETS_LINE_PREFIX)[A-Za-z0-9_]*($(SECRETS_KEYS))[A-Za-z0-9_]*[[:space:]]*=[[:space:]]*[^[:space:]]' \
-			| grep -vE '=[[:space:]]*ENC\[' \
-			| sed -E 's/$(SECRETS_LINE_PREFIX)([A-Za-z0-9_]+).*/\2/' \
+	@case "$(SECRETS_CHECK_SOURCE)" in \
+		index) where='ve stagnutém obsahu'; hint=', pak git add';; \
+		worktree) where='v pracovním adresáři'; hint=;; \
+		*) echo "SECRETS_CHECK_SOURCE musí být index nebo worktree, ne '$(SECRETS_CHECK_SOURCE)'."; exit 1;; \
+	esac; \
+	found=$$(for file in $(SOPS_CHECK_FILES); do \
+		{ if [ "$(SECRETS_CHECK_SOURCE)" = index ]; then git show ":$$file"; else cat "$$file"; fi; } 2>/dev/null \
+			| grep -iE '$(SECRETS_LINE_PREFIX)[A-Za-z0-9_]*($(SECRETS_KEYS))[A-Za-z0-9_]*[[:space:]]*=' \
+			| awk '{ \
+				line = $$0; sub(/^[ \t]*(export[ \t]+)?/, "", line); \
+				name = line; sub(/[ \t]*=.*/, "", name); \
+				v = line; sub(/^[^=]*=[ \t]*/, "", v); sub(/[ \t\r]+$$/, "", v); \
+				q = substr(v, 1, 1); \
+				if (length(v) >= 2 && (q == "\"" || q == "\047") && substr(v, length(v), 1) == q) v = substr(v, 2, length(v) - 2); \
+				if (v != "" && v !~ /^ENC\[[^]]*\]$$/) print name; \
+			}' \
 			$(if $(SECRETS_ALLOW),| grep -vxE '$(SECRETS_ALLOW)') | sed "s|^|$$file: |"; \
 	done); \
 	if [ -n "$$found" ]; then \
-		printf 'Nezašifrované citlivé hodnoty ve stagnutém obsahu (make secrets-encrypt SECRETS_STAGE=<stage>, pak git add):\n%s\n' "$$found"; exit 1; \
+		printf 'Nezašifrované citlivé hodnoty %s (make secrets-encrypt SECRETS_STAGE=<stage>%s):\n%s\n' "$$where" "$$hint" "$$found"; exit 1; \
 	fi
 
 # Gitleaks (známé formáty tokenů a klíčů) nad staged změnami - pokryje i soubory mimo config/
@@ -293,6 +308,7 @@ PRE_COMMIT_CHECKS ?= analyse-cs analyse-sc test-coverage _secrets-check _gitleak
 # jako v aliasu: obálka předá cestu skriptu do kontejneru, kde je project/ v /var/www/html.
 .PHONY: pre-commit
 pre-commit: export PATH := ./vendor/bin:./project/vendor/bin:$(PATH)
+pre-commit: export SECRETS_CHECK_SOURCE := index
 pre-commit:
 	@diffs() { git diff --name-only | while read -r f; do echo "$$f $$(git diff -- "$$f" | git hash-object --stdin)"; done; }; \
 	before=$$(diffs); \
