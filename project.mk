@@ -80,13 +80,14 @@ init-after::
 
 # Composer image ext-* ignoruje, runtime je musí mít podle composer.lock - release s novým
 # rozšířením musí spadnout tady, ne až za běhu (bin/check-extensions.php). 0 = vypnuto: deploy
-# (recept adt/docker-deployer) kontrolu v _prepare vypíná a volá `make check-extensions` až po
-# `dupd up` před přepnutím symlinku - v _prepare ještě běží starý kontejner, nový image s novým
-# rozšířením zvedne teprve publish.
+# (recept adt/docker-deployer) kontrolu v _prepare vypíná - v _prepare ještě běží starý kontejner.
+# CHECK_EXTENSIONS_PHP: php, ve kterém se kontroluje; deploy (>= 1.22) ho z příkazové řádky
+# přesměruje do preprod kopie php-next z nového image a kontroluje už v deploy:build.
 CHECK_EXTENSIONS ?= 1
+CHECK_EXTENSIONS_PHP ?= $(SUDO) php
 .PHONY: check-extensions
 check-extensions:
-	$(SUDO) php $(ADT_MAKE_SELF)bin/check-extensions.php
+	$(CHECK_EXTENSIONS_PHP) $(ADT_MAKE_SELF)bin/check-extensions.php
 
 _install:
 	@if [ "$(STAGE)" = "local" ] || [ "$(STAGE)" = "ci" ]; then \
@@ -94,7 +95,7 @@ _install:
 	else \
 		$(COMPOSER_BIN) install --no-dev ;\
 	fi
-	@[ "$(CHECK_EXTENSIONS)" != 1 ] || $(SUDO) php $(ADT_MAKE_SELF)bin/check-extensions.php
+	@[ "$(CHECK_EXTENSIONS)" != 1 ] || $(CHECK_EXTENSIONS_PHP) $(ADT_MAKE_SELF)bin/check-extensions.php
 	$(YARN) install
 
 _clear-autoload:
