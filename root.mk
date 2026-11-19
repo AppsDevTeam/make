@@ -221,7 +221,8 @@ SOPS_STAGE_GLOB = $(if $(filter-out all,$(SECRETS_STAGE)),.env.$(SECRETS_STAGE),
 # Soubory jedné stage - pro secrets-decrypt/secrets-encrypt.
 # .env.common je sdílený nešifrovaný základ, do šifrování nepatří.
 # Projekt může zúžit (override SOPS_FILES = ...), např. nešifrovat config/.env.local a .env.ci.
-SOPS_FILES ?= $(shell find ./config -type f -name "*$(SOPS_STAGE_GLOB)" ! -name "*.env.common")
+# .env.skeleton (verze nástrojů šablony) se nešifruje - sops by do něj dopsal metadata a _env je slepí do všech .env
+SOPS_FILES ?= $(shell find ./config -type f -name "*$(SOPS_STAGE_GLOB)" ! -name "*.env.common" ! -name "*.env.skeleton")
 # Kontrola v pre-commit hooku (_secrets-check) - default všechny stage i .env.common (ten se
 # nešifruje, secret v něm je chyba), soubory z indexu gitu i nové nesledované (ruční kontrola před
 # `git add`), `*` v pathspec bere i podadresáře.
@@ -271,9 +272,9 @@ secrets-encrypt-after::
 # s exit 0, takže by se `make secrets-encrypt SECRETS_STAGE=<překlep>` tvářil jako úspěch
 # a nechal na disku nezašifrovaná hesla
 _secrets-stage-check:
-	@if [ -n "$(filter-out all,$(SECRETS_STAGE))" ] && [ ! -f "config/.env.$(SECRETS_STAGE)" ]; then \
-		echo "Neznámá stage '$(SECRETS_STAGE)' - config/.env.$(SECRETS_STAGE) neexistuje."; \
-		echo "Dostupné: $(patsubst ./config/.env.%,%,$(wildcard ./config/.env.*)) all" | sed 's/ common//'; \
+	@if [ -n "$(filter-out all,$(SECRETS_STAGE))" ] && { [ ! -f "config/.env.$(SECRETS_STAGE)" ] || [ "$(SECRETS_STAGE)" = common ] || [ "$(SECRETS_STAGE)" = skeleton ]; }; then \
+		echo "Neznámá stage '$(SECRETS_STAGE)' - config/.env.$(SECRETS_STAGE) neexistuje nebo není stage."; \
+		echo "Dostupné: $(filter-out common skeleton,$(patsubst ./config/.env.%,%,$(wildcard ./config/.env.*))) all"; \
 		exit 1; \
 	fi
 
