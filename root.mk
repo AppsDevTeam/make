@@ -85,6 +85,25 @@ skeleton-update:
 	theirs=$$(git show $(SKELETON_REF):.gitlab-ci.yml 2>/dev/null | grep -m1 'component:' || true); \
 	[ "$$ours" = "$$theirs" ] || printf 'skeleton-update: CI komponenta v .gitlab-ci.yml je jinde než v šabloně:\n  projekt:%s\n  šablona:%s\n' "$${ours#*component:}" "$${theirs#*component:}"
 
+# Kontrola bez zápisu: soubory ze seznamu .skeleton šablony, které v projektu chybí nebo se liší od
+# šablony, a jiný tag CI komponenty. Nenulový návrat, když projekt není se šablonou srovnaný (jde
+# pustit i v CI); co dál, řekne make skeleton-update.
+.PHONY: skeleton-check
+skeleton-check:
+	@git fetch -q $(firstword $(subst /, ,$(SKELETON_REF)))
+	@files=$$(git show $(SKELETON_REF):.skeleton | sed -e 's/[[:space:]]*#.*//' -e '/^[[:space:]]*$$/d'); \
+	[ -n "$$files" ] || { echo "skeleton-check: $(SKELETON_REF) nemá .skeleton" >&2; exit 1; }; \
+	bad=0; \
+	for f in .skeleton $$files; do \
+		if [ ! -e "$$f" ]; then echo "chybí:   $$f"; bad=1; \
+		elif ! git show "$(SKELETON_REF):$$f" | cmp -s - "$$f"; then echo "liší se: $$f"; bad=1; fi; \
+	done; \
+	ours=$$(grep -m1 'component:' .gitlab-ci.yml 2>/dev/null || true); \
+	theirs=$$(git show $(SKELETON_REF):.gitlab-ci.yml 2>/dev/null | grep -m1 'component:' || true); \
+	[ "$$ours" = "$$theirs" ] || { echo "CI komponenta:$${ours#*component:} (šablona:$${theirs#*component:})"; bad=1; }; \
+	if [ $$bad = 0 ]; then echo "skeleton-check: projekt má soubory šablony $(SKELETON_REF)"; \
+	else echo "skeleton-check: projekt není srovnaný se šablonou $(SKELETON_REF) - make skeleton-update (docs/skeleton.md šablony)" >&2; exit 1; fi
+
 # Druhá izolovaná instance projektu (např. pro Claude Code): make config && make config-claude N=1
 # CONFIG_CLAUDE_DOMAIN: lokální doména projektu, druhá instance dostane <doména>_cl<N>.<tld>
 # (www.sandbox.loc → www.sandbox_cl1.loc); prázdné = doména se nemění
