@@ -50,6 +50,22 @@ config:
 	@command -v git > /dev/null && git config core.hooksPath hooks || true
 	@[ -z "$(SANDBOX_REMOTE)" ] || git remote get-url sandbox >/dev/null 2>&1 || git remote add sandbox $(SANDBOX_REMOTE)
 
+# Soubory šablony (seznam .skeleton z větve šablony) do projektu: přepíše je verzí šablony a připraví
+# do indexu, commit je na projektu. Co projekt potřebuje jinak, patří na místa pro rozšíření
+# (docs/skeleton.md šablony), ne do těchto souborů - rozdělané změny v nich proto cíl zastaví
+# (FORCE=1 je přepíše). Seznam se bere z šablony, takže nový soubor šablony přibude sám.
+SKELETON_REF ?= sandbox/sandbox
+.PHONY: skeleton-update
+skeleton-update:
+	@git fetch -q $(firstword $(subst /, ,$(SKELETON_REF)))
+	@files=$$(git show $(SKELETON_REF):.skeleton | sed -e 's/[[:space:]]*#.*//' -e '/^[[:space:]]*$$/d'); \
+	[ -n "$$files" ] || { echo "skeleton-update: $(SKELETON_REF) nemá .skeleton" >&2; exit 1; }; \
+	if [ "$(FORCE)" != 1 ] && [ -n "$$(git status --porcelain -- .skeleton $$files)" ]; then \
+		echo "skeleton-update: rozdělané změny v souborech šablony, commitni je nebo FORCE=1 je přepíše:" >&2; \
+		git status --short -- .skeleton $$files >&2; exit 1; \
+	fi; \
+	git checkout $(SKELETON_REF) -- .skeleton $$files && git diff --cached --stat HEAD -- .skeleton $$files
+
 # Druhá izolovaná instance projektu (např. pro Claude Code): make config && make config-claude N=1
 # CONFIG_CLAUDE_DOMAIN: lokální doména projektu, druhá instance dostane <doména>_cl<N>.<tld>
 # (www.sandbox.loc → www.sandbox_cl1.loc); prázdné = doména se nemění

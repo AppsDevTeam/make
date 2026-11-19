@@ -95,6 +95,7 @@ Vývoj balíčku: `ADT_MAKE_DEV=/absolutní/cesta/ke/klonu make ...` načte klon
 | Cíl | |
 |---|---|
 | `config` | pracovní kopie pro `local` (`_env`; `CONFIG_STAGE=ci` v CI, které nemá klíč k šifrovanému `.env.local`), lokální hodnoty do `.env`, git hooky, remote `sandbox` (`SANDBOX_REMOTE`, prázdné = nepřidávat) |
+| `skeleton-update [SKELETON_REF=sandbox/sandbox] [FORCE=1]` | soubory šablony ze seznamu `.skeleton` větve šablony (remote `sandbox`) přepíše jejich verzí a připraví do indexu (commit je na projektu); seznam se bere ze šablony, nový soubor přibude sám. Rozdělané změny v nich cíl zastaví (`FORCE=1` přepíše) - co projekt potřebuje jinak, patří na místa pro rozšíření (`docs/skeleton.md` šablony) |
 | `config-claude N=<n>` | druhá izolovaná instance (`<projekt>_cl<n>-local`, bez publikovaných portů, bez sdílené proxy; s `CONFIG_CLAUDE_DOMAIN=www.projekt.loc` i doména `www.projekt_cl<n>.loc`) |
 | `_env STAGE=<stage>` | `.env` v kořeni, `docker/` a `project/` z vrstev v `config/` (SOPS se rozšifruje), soubory stage, zašifrované JSON; háček `_env-after::`. Deploy ho pouští na serveru. Skládá se do dočasného `.env.tmp.XXXXXX` (0600) vedle cíle, který se smaže i při pádu nebo přerušení (jen `kill -9` ho nechá - projekt ho může přidat do `.gitignore`: `.env.tmp.*`) |
 | `_tls-cert` | (součást `_env`) na stage `local`/`ci` vygeneruje self-signed certifikát nginxu pro `PROJECT_URL` (se SAN, 10 let) do `TLS_CERT_DIR` (`docker/nginx/etc/nginx/conf.d`), jen když chybí; necommituje se |
