@@ -108,9 +108,17 @@ _clear-autoload:
 #
 # PHP-FPM je pri deployi obcas zrovna vytizene nebo se restartuje a FastCGI spojeni
 # spadne na "Stream got blocked, or terminated" - proto par pokusu s pauzou.
+#
+# Kontejner z image pred appsdevteam/php cachetool nema: prvni deploy pres recept adt/docker-deployer
+# nad takovym stackem. Reset se pak preskoci - deploy:publish kontejner stejne pretvori na novy image
+# s cistou opcache. Kdyz kontejner nebezi vubec, `de php true` selze a reset spadne jako driv.
 OPCACHE_RESET_ATTEMPTS ?= 5
 _clear-opcache:
-	@for i in $$(seq 1 $(OPCACHE_RESET_ATTEMPTS)); do \
+	@if $(DE_PHP) true >/dev/null 2>&1 && ! $(DE_PHP) which cachetool >/dev/null 2>&1; then \
+		echo "opcache:reset preskocen: bezici kontejner nema cachetool (image pred appsdevteam/php), novy image s cistou opcache nastartuje deploy:publish" >&2; \
+		exit 0; \
+	fi; \
+	for i in $$(seq 1 $(OPCACHE_RESET_ATTEMPTS)); do \
 		$(DE_PHP) cachetool opcache:reset && exit 0; \
 		echo "opcache:reset selhal (pokus $$i/$(OPCACHE_RESET_ATTEMPTS))" >&2; \
 		[ $$i -lt $(OPCACHE_RESET_ATTEMPTS) ] && sleep $$((i * 2)); \
