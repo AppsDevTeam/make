@@ -54,17 +54,36 @@ config:
 # do indexu, commit je na projektu. Co projekt potřebuje jinak, patří na místa pro rozšíření
 # (docs/skeleton.md šablony), ne do těchto souborů - rozdělané změny v nich proto cíl zastaví
 # (FORCE=1 je přepíše). Seznam se bere z šablony, takže nový soubor šablony přibude sám.
+# Makefile s řádky, které v něm šablona nikdy neměla (PROJECTS, MIGRATIONS_*, TEST_ENV_* ...), zastaví
+# taky - staré verze řádků šablony nevadí, porovnává se s celou historií souboru v šabloně:
+# přepsáním by projekt o nastavení přišel, patří do app.mk / project/app.mk.
 SKELETON_REF ?= sandbox/sandbox
+SKELETON_MAKEFILES ?= makefile project/makefile docker/makefile
 .PHONY: skeleton-update
 skeleton-update:
 	@git fetch -q $(firstword $(subst /, ,$(SKELETON_REF)))
-	@files=$$(git show $(SKELETON_REF):.skeleton | sed -e 's/[[:space:]]*#.*//' -e '/^[[:space:]]*$$/d'); \
+	@set -e; t=$$(mktemp); trap 'rm -f "$$t"' EXIT; \
+	files=$$(git show $(SKELETON_REF):.skeleton | sed -e 's/[[:space:]]*#.*//' -e '/^[[:space:]]*$$/d'); \
 	[ -n "$$files" ] || { echo "skeleton-update: $(SKELETON_REF) nemá .skeleton" >&2; exit 1; }; \
 	if [ "$(FORCE)" != 1 ] && [ -n "$$(git status --porcelain -- .skeleton $$files)" ]; then \
 		echo "skeleton-update: rozdělané změny v souborech šablony, commitni je nebo FORCE=1 je přepíše:" >&2; \
 		git status --short -- .skeleton $$files >&2; exit 1; \
 	fi; \
-	git checkout $(SKELETON_REF) -- .skeleton $$files && git diff --cached --stat HEAD -- .skeleton $$files
+	if [ "$(FORCE)" != 1 ]; then \
+		for f in $(SKELETON_MAKEFILES); do \
+			[ -f "$$f" ] && git show "$(SKELETON_REF):$$f" > "$$t" 2>/dev/null || continue; \
+			git log --format= -p "$(SKELETON_REF)" -- "$$f" | sed -n 's/^[-+]//p' >> "$$t"; \
+			extra=$$(grep -vxF -f "$$t" "$$f" | grep -v '^[[:space:]]*\(#\|$$\)' || true); \
+			[ -z "$$extra" ] || { printf 'skeleton-update: %s má řádky navíc proti šabloně - přesuň je do app.mk vedle něj (FORCE=1 je zahodí):\n%s\n' "$$f" "$$extra" >&2; exit 1; }; \
+		done; \
+	fi; \
+	old=$$(git show HEAD:.skeleton 2>/dev/null | sed -e 's/[[:space:]]*#.*//' -e '/^[[:space:]]*$$/d' || true); \
+	git checkout $(SKELETON_REF) -- .skeleton $$files; \
+	git diff --cached --stat HEAD -- .skeleton $$files; \
+	for f in $$old; do echo "$$files" | grep -qxF "$$f" || [ ! -e "$$f" ] || echo "skeleton-update: $$f šablona už nevlastní - smaž ho, nebo si ho nech jako soubor projektu"; done; \
+	ours=$$(grep -m1 'component:' .gitlab-ci.yml 2>/dev/null || true); \
+	theirs=$$(git show $(SKELETON_REF):.gitlab-ci.yml 2>/dev/null | grep -m1 'component:' || true); \
+	[ "$$ours" = "$$theirs" ] || printf 'skeleton-update: CI komponenta v .gitlab-ci.yml je jinde než v šabloně:\n  projekt:%s\n  šablona:%s\n' "$${ours#*component:}" "$${theirs#*component:}"
 
 # Druhá izolovaná instance projektu (např. pro Claude Code): make config && make config-claude N=1
 # CONFIG_CLAUDE_DOMAIN: lokální doména projektu, druhá instance dostane <doména>_cl<N>.<tld>
@@ -111,14 +130,14 @@ _env:
 	@# i ostatní účty (soubor čte jen projektový účet a kontejnery pod jeho UID)
 	@set -e; umask 077; tmp=; trap 'rm -f "$$tmp"' EXIT; trap 'exit 1' INT TERM HUP; \
 	tmp=$$(mktemp .env.tmp.XXXXXX); \
-	cat config/.env.common > $$tmp; \
+	{ $(if $(wildcard config/.env.skeleton),cat config/.env.skeleton; printf '\n\n';) cat config/.env.common; } > $$tmp; \
 	printf '\n\n' >> $$tmp && $(SUBMAKE) _sops-cat FILE=config/.env.$(STAGE) >> $$tmp; \
 	mv -f $$tmp .env
 
 	@set -e; umask 077; tmp=; trap 'rm -f "$$tmp"' EXIT; trap 'exit 1' INT TERM HUP; \
 	for dir in docker project; do \
 		tmp=$$(mktemp "$$dir/.env.tmp.XXXXXX"); \
-		cat config/.env.common > $$tmp; \
+		{ $(if $(wildcard config/.env.skeleton),cat config/.env.skeleton; printf '\n\n';) cat config/.env.common; } > $$tmp; \
 		printf '\n\n' >> $$tmp && cat config/$$dir/.env.common >> $$tmp; \
 		printf '\n\n' >> $$tmp && $(SUBMAKE) _sops-cat FILE=config/.env.$(STAGE) >> $$tmp; \
 		printf '\n\n' >> $$tmp && $(SUBMAKE) _sops-cat FILE=config/$$dir/.env.$(STAGE) >> $$tmp; \
