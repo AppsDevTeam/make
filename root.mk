@@ -5,6 +5,9 @@ ADT_MAKE_SELF := $(dir $(lastword $(MAKEFILE_LIST)))
 include $(ADT_MAKE_SELF)common.mk
 
 SOPS ?= $(SUDO) sops
+# Klíč s heslem sops otevírá u každého souboru zvlášť: cíle, které dešifrují víc souborů, lokálně
+# běží přes bin/sops-unlocked, který ho odemkne jednou. Na serverech (SUDO) beze změny.
+SOPS_UNLOCKED = $(if $(SUDO),,$(ADT_MAKE_SELF)bin/sops-unlocked )
 
 # Cíle, které jen přeposílá do project/ a docker/. Projekt přidá svoje přes PROJECT_MAKE_TARGETS
 # a DOCKER_MAKE_TARGETS (definované před include).
@@ -129,8 +132,10 @@ config-claude:
 # docker/ a project/ (vrstvy config/.env.common, config/<dir>/.env.common, config/.env.<stage>,
 # config/<dir>/.env.<stage>, zašifrované se rozšifrují). Deploy ho pouští v dočasném klonu na serveru.
 # Projektové kroky navíc: _env-after:: v makefilu projektu.
-.PHONY: _env _env-after
+.PHONY: _env _env-unlocked _env-after
 _env:
+	@$(SOPS_UNLOCKED)$(SUBMAKE) _env-unlocked
+_env-unlocked:
 	@for dir in docker project; do \
 		find config/$$dir -type f \( -name "*$(STAGE)*" \) ! -name ".env*" | while read src; do \
 			dest="$$dir/$${src#config/$$dir/}"; \
@@ -235,8 +240,10 @@ unexport SOPS_FILES SOPS_CHECK_FILES
 # Deploy předává stage explicitně, aby ho nerozbil poškozený soubor cizí stage.
 # Projektové kroky navíc (další šifrované soubory mimo dotenv, např. binární klíče):
 # secrets-decrypt-after:: a secrets-encrypt-after:: v makefilu projektu (SECRETS_STAGE k dispozici).
-.PHONY: secrets-decrypt secrets-encrypt secrets-decrypt-after secrets-encrypt-after _secrets-stage-check _secrets-check _sops-cat
+.PHONY: secrets-decrypt _secrets-decrypt-unlocked secrets-encrypt secrets-decrypt-after secrets-encrypt-after _secrets-stage-check _secrets-check _sops-cat
 secrets-decrypt: _secrets-stage-check
+	@$(SOPS_UNLOCKED)$(SUBMAKE) _secrets-decrypt-unlocked
+_secrets-decrypt-unlocked:
 	@for file in $(SOPS_FILES); do \
 		if grep -q "sops_mac" "$$file" 2>/dev/null; then \
 			echo "Decrypting $$file"; \

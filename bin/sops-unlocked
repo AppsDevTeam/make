@@ -1,0 +1,46 @@
+#!/bin/sh
+# Spustí příkaz se SSH klíčem pro sops odemčeným jednou: sops-unlocked <příkaz> [argumenty]
+# (volá root.mk kolem cílů, které dešifrují víc souborů)
+#
+# Klíč s heslem sops otevírá u každého souboru zvlášť a ptá se na heslo pokaždé; obálka sops
+# z adt/docker-binaries (kontejner bez tty) se zeptat neumí vůbec a dešifrování selže. Kopie klíče
+# bez hesla vznikne v soukromém dočasném adresáři, příkaz ji dostane v SOPS_AGE_SSH_PRIVATE_KEY_FILE
+# a po skončení (i po chybě nebo Ctrl+C) se smaže.
+#
+# Příkaz se spustí beze změny, když sops dostává klíč jinak (SOPS_AGE_KEY*), klíč neexistuje, nemá
+# heslo (i už odemčená kopie) nebo není terminál, kde se na heslo zeptat (CI, deploy).
+
+set -eu
+
+[ $# -gt 0 ] || { echo "použití: $0 <příkaz> [argumenty]" >&2; exit 2; }
+
+if [ -n "${SOPS_AGE_KEY-}${SOPS_AGE_KEY_FILE-}${SOPS_AGE_KEY_CMD-}" ]; then
+	exec "$@"
+fi
+
+key=${SOPS_AGE_SSH_PRIVATE_KEY_FILE-}
+if [ -z "$key" ]; then
+	for k in "$HOME/.ssh/id_ed25519" "$HOME/.ssh/id_rsa"; do
+		[ -f "$k" ] && { key=$k; break; }
+	done
+fi
+
+if [ -z "$key" ] || [ ! -f "$key" ] || ! command -v ssh-keygen >/dev/null 2>&1 \
+	|| ssh-keygen -y -P '' -f "$key" >/dev/null 2>&1 \
+	|| ! { : </dev/tty; } 2>/dev/null; then
+	exec "$@"
+fi
+
+dir=
+trap 'rm -rf "$dir"' EXIT
+trap 'exit 130' INT TERM HUP
+tmp=${TMPDIR:-/tmp}
+dir=$(mktemp -d "${tmp%/}/sops-key.XXXXXX")
+chmod 700 "$dir"
+(umask 077 && cp "$key" "$dir/key")
+
+echo "sops: heslo ke klíči $key (jednou pro všechny soubory)" >&2
+ssh-keygen -p -N '' -f "$dir/key" >/dev/null </dev/tty \
+	|| { echo "sops: klíč se nepodařilo odemknout" >&2; exit 1; }
+
+SOPS_AGE_SSH_PRIVATE_KEY_FILE="$dir/key" "$@"
