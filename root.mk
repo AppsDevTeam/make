@@ -356,9 +356,13 @@ _sops-cat:
 # Kontroly před commitem - hooks/pre-commit projektu je jen `exec make pre-commit` (git ho pouští
 # v kořeni repozitáře). Nejdřív automatické opravy PRE_COMMIT_FIX, pak cíle PRE_COMMIT_CHECKS;
 # výstup kontroly se vypíše jen při chybě, commit projde, jen když prošly všechny. Projekt
-# seznam mění před include, např. `PRE_COMMIT_CHECKS += analyse-deps`.
+# seznam mění před include přes výchozí seznam, např.
+# `PRE_COMMIT_CHECKS = $(PRE_COMMIT_CHECKS_DEFAULT) analyse-deps` (`=`, ne `:=` - výchozí seznam
+# vzniká až tady). `PRE_COMMIT_CHECKS += …` před include nefunguje: `?=` níž by pak už nic
+# nenastavilo a zbyla by jen přidaná kontrola (do 1.13.0 to README radilo).
 PRE_COMMIT_FIX ?= analyse-cs-fix
-PRE_COMMIT_CHECKS ?= analyse-cs analyse-sc test-coverage _secrets-check _gitleaks-staged
+PRE_COMMIT_CHECKS_DEFAULT = analyse-cs analyse-sc test-coverage _secrets-check _gitleaks-staged
+PRE_COMMIT_CHECKS ?= $(PRE_COMMIT_CHECKS_DEFAULT)
 
 # Soubory, které oprava změnila, se musí dostat i do commitu - git commituje index, ne pracovní
 # adresář, a kontroly běží nad pracovním adresářem: neopravená verze by jinak prošla do gitu.
