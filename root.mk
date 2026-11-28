@@ -333,11 +333,67 @@ GITLEAKS_IMAGE ?= zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb
 # safe.directory: v CI (dind) patří repo jinému uživateli než procesu v kontejneru a git by odmítl číst
 GITLEAKS = docker run --rm --network none -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory \
 	-e GIT_CONFIG_VALUE_0='*' -v "$(CURDIR):/repo:ro" $(GITLEAKS_IMAGE)
+# Konfigurace z bin/gitleaks-config: výchozí pravidla (nebo .gitleaks.toml projektu) a pravidlo
+# adt-dotenv-secret ze SECRETS_KEYS - výchozí pravidla znají jen tvary tokenů, DB_PASSWORD=heslo123
+# by jim prošlo. Soubor vzniká v repu (v CI s dind vidí docker jen /builds, ne /tmp) a hned se maže;
+# neobsahuje nic tajného, jen jména. -i: .gitleaksignore projektu (otisky falešných nálezů).
+GITLEAKS_CONFIG_FILE = .gitleaks.adt.toml
+GITLEAKS_RUN = SECRETS_KEYS='$(SECRETS_KEYS)' SECRETS_ALLOW='$(SECRETS_ALLOW)' $(ADT_MAKE_SELF)bin/gitleaks-config > $(GITLEAKS_CONFIG_FILE); \
+	trap 'rm -f $(GITLEAKS_CONFIG_FILE)' EXIT; \
+	$(GITLEAKS) git --config /repo/$(GITLEAKS_CONFIG_FILE) -i /repo --no-banner
 .PHONY: _gitleaks-staged secrets-scan
 _gitleaks-staged:
-	@$(GITLEAKS) git --pre-commit --staged --redact --verbose --no-banner /repo
+	@$(GITLEAKS_RUN) --pre-commit --staged --redact --verbose /repo
 secrets-scan:
-	@$(GITLEAKS) git --redact --verbose --no-banner $(if $(SECRETS_SCAN_RANGE),--log-opts="$(SECRETS_SCAN_RANGE)") /repo
+	@$(GITLEAKS_RUN) --redact --verbose $(if $(SECRETS_SCAN_RANGE),--log-opts="$(SECRETS_SCAN_RANGE)") /repo
+
+# Secrets z celé historie gitu: history-scan je najde (stejný gitleaks a pravidla jako výše) a připraví
+# plán, history-clean je po potvrzení přepíše (git filter-repo: hodnota tokenu všude, hodnota proměnné
+# z config/**/.env.* jen na jejím řádku - krátké heslo by jinak přepsalo i stejné slovo v kódu, soubor
+# s klíčem se smaže celý). Report s hodnotami, záloha (git bundle --all), seznam náhrad a commit-map
+# jdou do HISTORY_CLEAN_DIR/<repo>-<čas>/ (0700). Přepis secret nezneplatní - rotace je první ruční krok.
+# Falešný nález: otisk z výpisu do .gitleaksignore. Další náhrady (co gitleaks nenajde): HISTORY_CLEAN_EXTRA=<soubor>
+# ve formátu --replace-text. Potvrzení přeskočí HISTORY_CLEAN_YES=1.
+HISTORY_CLEAN_DIR ?= $(HOME)/.history-clean
+HISTORY_CLEAN_EXTRA ?=
+# Nastaví $out a $plan (návratový kód plánu: 0 = je co přepsat, 1 = ruční zásah, 2 = čisto)
+HISTORY_SCAN = command -v python3 >/dev/null || { echo "history-scan: potřebuje python3" >&2; exit 1; }; \
+	out="$(HISTORY_CLEAN_DIR)/$(notdir $(CURDIR))-$$(date +%Y%m%d-%H%M%S)"; umask 077; mkdir -p "$$out"; \
+	$(GITLEAKS_RUN) --exit-code 0 --report-format json --report-path - /repo > "$$out/report.json"; \
+	plan=0; python3 $(ADT_MAKE_SELF)bin/history-clean.py plan "$$out/report.json" "$$out" $(HISTORY_CLEAN_EXTRA) || plan=$$?
+.PHONY: history-scan history-clean
+history-scan:
+	@$(HISTORY_SCAN); \
+	case $$plan in \
+		2) rm -rf "$$out"; exit 0;; \
+		0) echo "history-scan: plán v $$out - make history-clean přepíše historii"; exit 1;; \
+		*) exit $$plan;; \
+	esac
+history-clean:
+	@git filter-repo --version >/dev/null 2>&1 || { echo "history-clean: potřebuje git filter-repo (brew install git-filter-repo)" >&2; exit 1; }
+	@[ -z "$$(git status --porcelain)" ] || { echo "history-clean: pracovní strom není čistý" >&2; git status --short >&2; exit 1; }
+	@set -e; $(HISTORY_SCAN); \
+	case $$plan in 2) rm -rf "$$out"; exit 0;; 0) ;; *) exit $$plan;; esac; \
+	if [ "$(HISTORY_CLEAN_YES)" != 1 ]; then \
+		printf '\nPřepsat historii všech větví a tagů podle plánu výše? Záloha: %s/backup.bundle [y/N] ' "$$out"; \
+		read -r answer < /dev/tty; [ "$$answer" = y ] || { echo "history-clean: zrušeno, plán zůstává v $$out"; exit 1; }; \
+	fi; \
+	git bundle create "$$out/backup.bundle" --all; \
+	git remote -v | awk '$$3 == "(fetch)" { print $$1, $$2 }' > "$$out/remotes.txt"; \
+	paths=(); while IFS= read -r p; do [ -n "$$p" ] && paths+=(--path "$$p"); done < "$$out/paths.txt"; \
+	git filter-repo --force --replace-text "$$out/replace.txt" $${paths[@]:+--invert-paths "$${paths[@]}"}; \
+	while read -r name url; do git remote get-url "$$name" >/dev/null 2>&1 || git remote add "$$name" "$$url"; done < "$$out/remotes.txt"; \
+	cp .git/filter-repo/commit-map "$$out/commit-map.txt"; \
+	$(GITLEAKS_RUN) --exit-code 0 --report-format json --report-path - /repo > "$$out/report-after.json"; \
+	if python3 $(ADT_MAKE_SELF)bin/history-clean.py plan "$$out/report-after.json" >/dev/null; then \
+		echo "history-clean: po přepisu gitleaks pořád něco nachází, viz $$out/report-after.json" >&2; exit 1; \
+	fi; \
+	printf '\nhistory-clean: historie přepsaná, gitleaks už nic nenachází. Záloha a commit-map: %s\nZbývá ručně:\n' "$$out"; \
+	printf '  1. rotovat každý nalezený secret - přepis historie ho nezneplatní\n'; \
+	printf '  2. na GitLabu dočasně povolit force push chráněné větve, pak: git push --force --all && git push --force --tags\n'; \
+	printf '  3. GitLab Settings > Repository > Repository cleanup s %s/commit-map.txt\n' "$$out"; \
+	printf '  4. nové klony u všech vývojářů (git pull nad starou historií ji vrátí), na serverech make dep\n'; \
+	printf '  5. .gitleaksignore má otisky se starými hashi - smazat nebo přepsat\n'
 
 _sops-cat:
 	@if [ -f "$(FILE)" ]; then \

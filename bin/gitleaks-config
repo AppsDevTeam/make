@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Konfigurace gitleaks pro cíle adt/make (stdout): výchozí pravidla (nebo .gitleaks.toml projektu,
+# který je rozšiřuje sám) a navíc pravidlo adt-dotenv-secret z konvence projektů - v config/**/.env.*
+# je proměnná s citlivým jménem (SECRETS_KEYS) s jinou hodnotou než ENC[...] secret bez ohledu na to,
+# jak hodnota vypadá. Výchozí pravidla hledají jen tvary známých tokenů a náhodné řetězce, takže
+# DB_PASSWORD=heslo123 by jim prošlo. Výjimky jmen (SECRETS_ALLOW) platí i tady.
+# Cesty jsou cesty v kontejneru gitleaks (repo je /repo).
+set -eu
+
+: "${SECRETS_KEYS:?SECRETS_KEYS chybí}"
+allow=${SECRETS_ALLOW:-}
+
+if [ -f .gitleaks.toml ]; then
+	printf '[extend]\npath = "/repo/.gitleaks.toml"\n\n'
+else
+	printf '[extend]\nuseDefault = true\n\n'
+fi
+
+# Jeden allowlist nad celou shodou (NAME=hodnota): regexTarget "line" gitleaks 8.30 u pravidla ignoruje
+cat <<EOF
+[[rules]]
+id = "adt-dotenv-secret"
+description = "Nezašifrovaná hodnota proměnné s citlivým jménem (SECRETS_KEYS adt/make) v config/**/.env.*"
+regex = '''(?im)^[ \t]*(?:export[ \t]+)?[a-z0-9_]*(?:${SECRETS_KEYS})[a-z0-9_]*[ \t]*=[ \t]*["']?([^\s"'#]+)'''
+secretGroup = 1
+path = '''(^|/)config/(.*/)?\.env\.[^/]+\$'''
+
+[[rules.allowlists]]
+regexTarget = "match"
+regexes = ['''=[ \t]*["']?(ENC\[|\*\*\*REMOVED\*\*\*)'''${allow:+, '''(?i)^[ \t]*(?:export[ \t]+)?(?:${allow})[ \t]*='''}]
+EOF
