@@ -171,5 +171,7 @@ migrations-before::
 `docker-up` (na popředí), `docker-upd`, `docker-upd-no-pull`, `docker-down` - **jen na stage `local`
 a `ci`**, jinde končí chybou: na serverech kontejnery spravuje `dupd` (adt/docker-binaries, deploy ho
 volá sám; root `dupd -u <projekt> up`), protože `~/docker` patří účtu projektu a root, který v něm
-spustí make, vykoná jeho kód. `audit-image` (Trivy `TRIVY_IMAGE` připnutý digestem, `IMAGE`; skenuje archiv z `docker save`, socket Dockeru nedostane). Lokálně porty na `PROJECT_IP` a volitelná sdílená proxy
+spustí make, vykoná jeho kód. Před `up` zastaví služby z `DOCKER_STOP_BEFORE_UP` (default
+`supervisor`, jen pokud ji compose projektu má), aby consumery během přetvoření fronty nepadaly ve
+smyčce. `audit-image` (Trivy `TRIVY_IMAGE` připnutý digestem, `IMAGE`; skenuje archiv z `docker save`, socket Dockeru nedostane). Lokálně porty na `PROJECT_IP` a volitelná sdílená proxy
 adt/local-proxy (`LOCAL_PROXY`, `LOCAL_PROXY_DIR`).

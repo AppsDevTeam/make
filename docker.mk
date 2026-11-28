@@ -30,18 +30,28 @@ endif
 ################################################################################
 # TARGETS
 
-.PHONY: docker-down docker-up docker-upd docker-upd-no-pull _docker-upd-no-build audit-image _docker-common _docker-local-only
+.PHONY: docker-down docker-up docker-upd docker-upd-no-pull _docker-upd-no-build audit-image _docker-common _docker-local-only _docker-stop-before-up
 docker-down: _docker-local-only
 	$(DOCKER_COMPOSE) down
 
-docker-up: _docker-local-only _docker-common
+docker-up: _docker-local-only _docker-common _docker-stop-before-up
 	$(DOCKER_COMPOSE) up --force-recreate --build
 
-docker-upd: _docker-local-only _docker-common
+docker-upd: _docker-local-only _docker-common _docker-stop-before-up
 	$(DOCKER_COMPOSE) up -d --force-recreate --build
 
-docker-upd-no-pull: _docker-local-only
+docker-upd-no-pull: _docker-local-only _docker-stop-before-up
 	$(DOCKER_COMPOSE) up -d --force-recreate --build
+
+# `--force-recreate` přetvoří i frontu (rabbitmq), zatímco consumery v supervisoru dál běží - během
+# té díry se restartují ve smyčce a každý pád zaloguje "Unable to connect" (depends_on platí jen při
+# startu, ne při recreate pod běžícím dependentem). Proto se zastaví předem, `up` je pustí znovu.
+# Jen služby, které projekt v compose má.
+DOCKER_STOP_BEFORE_UP ?= supervisor
+_docker-stop-before-up:
+	@have=$$($(DOCKER_COMPOSE) config --services 2>/dev/null); \
+	stop=$$(for s in $(DOCKER_STOP_BEFORE_UP); do printf '%s\n' "$$have" | grep -qxF "$$s" && echo "$$s"; done); \
+	[ -z "$$stop" ] || $(DOCKER_COMPOSE) stop $$stop || true
 
 _docker-upd-no-build: _docker-local-only
 	$(DOCKER_COMPOSE) up -d --force-recreate
