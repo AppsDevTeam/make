@@ -8,7 +8,7 @@ a bez přihlášení - pro CI (adt/ci: publish stage vydá tag a GitLab Release)
 ANTHROPIC_API_KEY v prostředí.
 
 Zadání bere ze skillu projektu `.claude/commands/release-notes.md` (bez YAML hlavičky, `$1`
-= verze), když ho projekt nemá, z vestavěného zadání níže (stejný formát jako sandbox).
+= verze, `$2` = soubor release notes), když ho projekt nemá, z vestavěného zadání níže (stejný formát jako sandbox).
 Model dostane commity od posledního tagu (zprávy, těla, změněné soubory) a začátek
 dosavadních release notes kvůli stylu; vrátí jen nový záznam, skript ho vloží za oddělovač
 `---` pod blok „Schéma verzování" (nad nejnovější záznam). Soubor bez oddělovače dostane
@@ -27,7 +27,7 @@ import urllib.request
 DEFAULT_MODEL = 'claude-opus-5-5'
 API_URL = 'https://api.anthropic.com/v1/messages'
 
-DEFAULT_PROMPT = """Připrav release notes pro verzi **$1** do `docs/release-notes.md`.
+DEFAULT_PROMPT = """Připrav release notes pro verzi **$1** do `$2`.
 
 ## Formát záznamu
 
@@ -89,14 +89,14 @@ def die(message):
     sys.exit(1)
 
 
-def load_prompt(version):
+def load_prompt(version, path_notes):
     path = '.claude/commands/release-notes.md'
     text = DEFAULT_PROMPT
     if os.path.exists(path):
         with open(path, encoding='utf-8') as f:
             text = f.read()
         text = re.sub(r'\A---\n.*?\n---\n', '', text, count=1, flags=re.S)
-    return text.replace('$1', version)
+    return text.replace('$1', version).replace('$2', path_notes)
 
 
 def git_context():
@@ -183,7 +183,7 @@ def main():
     last, log, stat = git_context()
     today = datetime.date.today()
     user = (
-        f'{load_prompt(version)}\n\n'
+        f'{load_prompt(version, path)}\n\n'
         f'Dnešní datum: {today.day}.{today.month}.{today.year}\n'
         f'Poslední tag: {last or "žádný (první release - níže je jen posledních 50 commitů, popiš je jako první verzi)"}\n\n'
         f'## Commity od posledního tagu\n\n{log}\n\n'

@@ -427,7 +427,7 @@ release-notes:
 		python3 $(ADT_MAKE_SELF)bin/release-notes.py "$$VERSION" "$(RELEASE_NOTES)" "$(RELEASE_NOTES_MODEL)"; \
 	else \
 		command -v claude >/dev/null || { echo "claude CLI není nainstalované (nebo nastav ANTHROPIC_API_KEY)"; exit 1; }; \
-		USER=$$(id -un) claude -p "/release-notes $$VERSION" --allowedTools "Edit($(RELEASE_NOTES))"; \
+		USER=$$(id -un) claude -p "/release-notes $$VERSION $(RELEASE_NOTES)" --allowedTools "Edit($(RELEASE_NOTES))"; \
 		changed=$$(git status --porcelain | grep -v " $(RELEASE_NOTES)$$" || true); \
 		[ -z "$$changed" ] || { printf 'Claude změnil i jiné soubory než $(RELEASE_NOTES) - zkontroluj:\n%s\n' "$$changed" >&2; exit 1; }; \
 	fi
