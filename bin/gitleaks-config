@@ -3,7 +3,7 @@
 # který je rozšiřuje sám) a navíc pravidlo adt-dotenv-secret z konvence projektů - v config/**/.env.*
 # je proměnná s citlivým jménem (SECRETS_KEYS) s jinou hodnotou než ENC[...] secret bez ohledu na to,
 # jak hodnota vypadá. Výchozí pravidla hledají jen tvary známých tokenů a náhodné řetězce, takže
-# DB_PASSWORD=heslo123 by jim prošlo. Výjimky jmen (SECRETS_ALLOW) platí i tady.
+# obyčejné heslo v hodnotě proměnné by jim prošlo. Výjimky jmen (SECRETS_ALLOW) platí i tady.
 # Cesty jsou cesty v kontejneru gitleaks (repo je /repo).
 set -eu
 

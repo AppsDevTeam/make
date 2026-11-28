@@ -334,8 +334,8 @@ GITLEAKS_IMAGE ?= zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb
 GITLEAKS = docker run --rm --network none -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory \
 	-e GIT_CONFIG_VALUE_0='*' -v "$(CURDIR):/repo:ro" $(GITLEAKS_IMAGE)
 # Konfigurace z bin/gitleaks-config: výchozí pravidla (nebo .gitleaks.toml projektu) a pravidlo
-# adt-dotenv-secret ze SECRETS_KEYS - výchozí pravidla znají jen tvary tokenů, DB_PASSWORD=heslo123
-# by jim prošlo. Soubor vzniká v repu (v CI s dind vidí docker jen /builds, ne /tmp) a hned se maže;
+# adt-dotenv-secret ze SECRETS_KEYS - výchozí pravidla znají jen tvary tokenů, obyčejné heslo
+# v hodnotě proměnné by jim prošlo. Soubor vzniká v repu (v CI s dind vidí docker jen /builds, ne /tmp) a hned se maže;
 # neobsahuje nic tajného, jen jména. -i: .gitleaksignore projektu (otisky falešných nálezů).
 GITLEAKS_CONFIG_FILE = .gitleaks.adt.toml
 GITLEAKS_RUN = SECRETS_KEYS='$(SECRETS_KEYS)' SECRETS_ALLOW='$(SECRETS_ALLOW)' $(ADT_MAKE_SELF)bin/gitleaks-config > $(GITLEAKS_CONFIG_FILE); \
