@@ -53,6 +53,18 @@ config:
 	@command -v git > /dev/null && git config core.hooksPath hooks || true
 	@[ -z "$(SANDBOX_REMOTE)" ] || git remote get-url sandbox >/dev/null 2>&1 || git remote add sandbox $(SANDBOX_REMOTE)
 
+# Recepty adt/recipes (soubory infrastruktury, které projekt přebírá beze změny) podle .recipes projektu:
+# recipes-check vypíše, co chybí nebo se liší, recipes-update je přepíše a připraví do indexu (FORCE=1
+# i přes rozdělané změny), viz bin/recipes. RECIPES_DEV=<klon adt/recipes> pro vývoj receptů.
+RECIPES_FILE ?= .recipes
+RECIPES_REPO ?= ssh://git@git.appsdevteam.com:2222/adt/recipes.git
+RECIPES_CACHE ?= $(HOME)/.cache/adt-recipes
+.PHONY: recipes-check recipes-update
+recipes-check recipes-update:
+	@RECIPES_FILE='$(RECIPES_FILE)' RECIPES_REPO='$(RECIPES_REPO)' RECIPES_CACHE='$(RECIPES_CACHE)' \
+		RECIPES_DEV='$(RECIPES_DEV)' FORCE='$(FORCE)' $(ADT_MAKE_SELF)bin/recipes $(@:recipes-%=%)
+
+# Přechodné (projekty založené před recepty, nahrazuje recipes-update):
 # Soubory šablony (seznam .skeleton z větve šablony) do projektu: přepíše je verzí šablony a připraví
 # do indexu, commit je na projektu. Co projekt potřebuje jinak, patří na místa pro rozšíření
 # (docs/skeleton.md šablony), ne do těchto souborů - rozdělané změny v nich proto cíl zastaví

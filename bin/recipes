@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# Recepty adt/recipes - soubory infrastruktury, které projekt přebírá beze změny (cíle recipes-update
+# a recipes-check). .recipes projektu: řádek version=<tag adt/recipes> a jména receptů (závislosti
+# z recipes/<recept>/requires se přidají samy). Recept vlastní celé soubory recipes/<recept>/files/,
+# každý soubor smí vlastnit jen jeden recept. Zdroj: RECIPES_DEV (klon pro vývoj receptů), jinak tag
+# z RECIPES_REPO naklonovaný přes git (SSH vývojáře) do RECIPES_CACHE - repo je soukromé, composer
+# v kontejneru ani CI by bez tokenu nestáhly.
+#   recipes check   - soubory receptů, které v projektu chybí nebo se liší (obsah, spustitelnost)
+#   recipes update  - přepíše je verzí receptu a připraví do indexu (FORCE=1 i přes rozdělané změny)
+set -euo pipefail
+
+cmd=${1:-}
+file=${RECIPES_FILE:-.recipes}
+repo=${RECIPES_REPO:-ssh://git@git.appsdevteam.com:2222/adt/recipes.git}
+cache=${RECIPES_CACHE:-$HOME/.cache/adt-recipes}
+
+die() { echo "recipes: $*" >&2; exit 1; }
+
+parse_version() { sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' | tr -d '[:space:]' | tail -n1; }
+parse_names() { sed -e 's/#.*//' -e '/^[[:space:]]*version[[:space:]]*=/d' | tr -s ' \t' '\n\n' | sed '/^$/d'; }
+
+# $1 = verze -> adresář s recipes/ (v subshellu, chyba se vrací návratovým kódem)
+source_dir() {
+	if [ -n "${RECIPES_DEV:-}" ]; then echo "$RECIPES_DEV"; return; fi
+	local v=$1 dir tmp
+	[ -n "$v" ] || die "$file nemá řádek version=<tag adt/recipes>"
+	[[ "$v" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "verze '$v' v $file není tag X.Y.Z"
+	dir="$cache/$v"
+	if [ ! -d "$dir/recipes" ]; then
+		mkdir -p "$cache"
+		tmp=$(mktemp -d "$cache/.clone.XXXXXX")
+		git clone -q --depth 1 --branch "$v" -c advice.detachedHead=false "$repo" "$tmp/r" >&2 \
+			|| { rm -rf "$tmp"; die "adt/recipes $v nejde stáhnout z $repo"; }
+		rm -rf "$dir"; mv "$tmp/r" "$dir"; rm -rf "$tmp"
+	fi
+	echo "$dir"
+}
+
+# RESOLVED = recepty včetně závislostí, závislost před receptem
+resolve() {
+	local src=$1 n; shift
+	RESOLVED=(); VISITING=()
+	for n in "$@"; do visit "$src" "$n"; done
+}
+visit() {
+	local src=$1 r=$2 x
+	[[ "$r" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "neplatné jméno receptu '$r'"
+	[ -d "$src/recipes/$r/files" ] || die "recept '$r' v adt/recipes neexistuje"
+	for x in ${RESOLVED[@]+"${RESOLVED[@]}"}; do [ "$x" = "$r" ] && return 0; done
+	for x in ${VISITING[@]+"${VISITING[@]}"}; do [ "$x" = "$r" ] && die "cyklická závislost receptů přes '$r'"; done
+	VISITING+=("$r")
+	if [ -f "$src/recipes/$r/requires" ]; then
+		for x in $(sed 's/#.*//' "$src/recipes/$r/requires"); do visit "$src" "$x"; done
+	fi
+	RESOLVED+=("$r")
+}
+
+# "recept<TAB>soubor" všech vyřešených receptů
+owned() {
+	local src=$1 r; shift
+	for r in "$@"; do
+		(cd "$src/recipes/$r/files" && find . -type f | sed -e 's|^\./||' -e "s|^|$r	|")
+	done | sort -t "	" -k2
+}
+
+[ "$cmd" = check ] || [ "$cmd" = update ] || die "použití: recipes check|update"
+[ -f "$file" ] || die "chybí $file (řádek version=<tag adt/recipes> a jména receptů)"
+version=$(parse_version < "$file")
+names=$(parse_names < "$file")
+[ -n "$names" ] || die "$file neuvádí žádný recept"
+src=$(source_dir "$version") || exit 1
+# shellcheck disable=SC2086
+resolve "$src" $names
+list=$(owned "$src" "${RESOLVED[@]}")
+dup=$(printf '%s\n' "$list" | cut -f2 | uniq -d)
+[ -z "$dup" ] || die "soubor patří víc receptům: $(echo $dup)"
+files=$(printf '%s\n' "$list" | cut -f2)
+label="adt/recipes ${RECIPES_DEV:+(RECIPES_DEV) }${version} (${RESOLVED[*]})"
+
+if [ "$cmd" = check ]; then
+	bad=0
+	while IFS="	" read -r r f; do
+		s="$src/recipes/$r/files/$f"
+		sx=0; [ -x "$s" ] && sx=1
+		fx=0; [ -x "$f" ] && fx=1
+		if [ ! -e "$f" ]; then echo "chybí:   $f ($r)"; bad=1
+		elif ! cmp -s "$s" "$f"; then echo "liší se: $f ($r)"; bad=1
+		elif [ $sx != $fx ]; then echo "práva:   $f ($r, spustitelnost)"; bad=1
+		fi
+	done <<< "$list"
+	if [ $bad = 0 ]; then echo "recipes-check: soubory odpovídají $label"
+	else echo "recipes-check: projekt neodpovídá $label - make recipes-update" >&2; exit 1; fi
+	exit 0
+fi
+
+# shellcheck disable=SC2086
+if [ "${FORCE:-}" != 1 ] && [ -n "$(git status --porcelain -- $files)" ]; then
+	echo "recipes-update: rozdělané změny v souborech receptů, commitni je nebo FORCE=1 je přepíše:" >&2
+	# shellcheck disable=SC2086
+	git status --short -- $files >&2
+	exit 1
+fi
+while IFS="	" read -r r f; do
+	s="$src/recipes/$r/files/$f"
+	mkdir -p "$(dirname "$f")"
+	cp "$s" "$f"
+	if [ -x "$s" ]; then chmod +x "$f"; else chmod -x "$f"; fi
+done <<< "$list"
+# shellcheck disable=SC2086
+git add -- $files
+# shellcheck disable=SC2086
+git diff --cached --stat HEAD -- $files
+
+# Soubory, které recepty z .recipes v HEAD vlastnily a nové už ne, se nemažou - mohou být už souborem projektu
+if old=$(git show "HEAD:$file" 2>/dev/null); then
+	old_version=$(printf '%s\n' "$old" | parse_version)
+	old_names=$(printf '%s\n' "$old" | parse_names)
+	if [ "$old_version" != "$version" ] || [ "$old_names" != "$names" ]; then
+		if old_src=$(source_dir "$old_version" 2>/dev/null); then
+			# shellcheck disable=SC2086
+			( resolve "$old_src" $old_names 2>/dev/null && owned "$old_src" "${RESOLVED[@]}" ) | cut -f2 | while read -r f; do
+				printf '%s\n' "$files" | grep -qxF -- "$f" || [ ! -e "$f" ] \
+					|| echo "recipes-update: $f už žádný recept nevlastní - smaž ho, nebo si ho nech jako soubor projektu"
+			done
+		fi
+	fi
+fi
+echo "recipes-update: soubory z $label připravené v indexu, commit je na projektu"
